@@ -4,6 +4,12 @@
 
 > ⚠️ Early development. The API and spec are still being defined; not yet released.
 
+## Docs
+
+- **[Build spec](spec.html)** — the full v1 architecture, schema, and API surface.
+- **[Roadmap](roadmap.html)** — committed v1 scope, what's deferred, and open decisions.
+- **[Runbook](docs/RUNBOOK.md)** — run it end-to-end and wire luminmail as the first client.
+
 ## What it is
 
 Mailtapper turns scattered email accounts into one clean, queryable API. Point it at a mailbox and your agents read that mail as normalized JSON — no raw IMAP, no MIME parsing, no per-provider quirks.
