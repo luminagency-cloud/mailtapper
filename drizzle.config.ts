@@ -1,3 +1,4 @@
+import "dotenv/config"; // so drizzle-kit (db:push / db:generate) sees DATABASE_URL from .env
 import type { Config } from "drizzle-kit";
 
 export default {

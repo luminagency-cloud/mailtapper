@@ -8,11 +8,7 @@ Two services on one machine: **mailtapper on `:3000`**, **luminmail on `:3001`**
 
 Node 20+, a Postgres URL (your Neon string), your mailbox's IMAP credentials, plus `openssl` and `psql`.
 
-> **Heads-up — `.env` loading.** The scaffold doesn't bundle `dotenv`, so load `.env` into your shell before any `npm` command:
-> ```bash
-> set -a; source .env; set +a
-> ```
-> (Or run the built app with `node --env-file=.env dist/index.js`.)
+> **`.env` auto-loads.** mailtapper bundles `dotenv`, so a `.env` in the repo root is picked up automatically by the server, the seed script, and drizzle-kit — no shell sourcing. (In Docker, env comes from `environment:` and dotenv simply no-ops.)
 
 > **Heads-up — types.** `npm run dev` uses **tsx**, which transpiles without type-checking, so it **boots even if `npm run typecheck` still reports the minor ImapFlow type nits**. Run `npm run typecheck` separately to clean those up; it won't block booting.
 
@@ -31,8 +27,6 @@ cp .env.example .env
 echo "MAILTAPPER_KEK_B64=$(openssl rand -base64 32)"        # paste into .env
 echo "MAILTAPPER_LOCATOR_SECRET=$(openssl rand -base64 32)" # paste into .env
 # then edit .env: DATABASE_URL=<your Neon url>, PORT=3000
-
-set -a; source .env; set +a       # load env for the commands below
 
 npm run db:push                   # create tables: connections, api_keys, tenants, tenant_keys
 npm run seed -- "personal"        # prints your API key ONCE — copy it
@@ -128,7 +122,7 @@ docker compose up -d --build      # api + caddy; point the Caddyfile at your dom
 
 ## Gotchas recap
 
-- Load `.env` into the shell (no dotenv bundled): `set -a; source .env; set +a`.
+- `.env` auto-loads via dotenv — no shell sourcing needed.
 - Ports: mailtapper `:3000`, luminmail `:3001`.
 - `npm run dev` runs despite the known type nits (tsx transpiles without type-checking).
 - In luminmail, `delete`/`reply`/`compose` are inert now — v1 mailtapper is read-only, which is expected for the dogfood.

@@ -1,3 +1,4 @@
+import "dotenv/config"; // auto-load .env (repo root) before anything reads process.env
 import { z } from "zod";
 
 /** Validated process env. Fails fast at boot if anything required is missing. */
