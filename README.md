@@ -1,4 +1,4 @@
-# Mailtap
+# Mailtapper
 
 **An access layer for email.** Connect any IMAP/POP mailbox and read it as clean, unified JSON through one API — built for AI agents and automations, not humans.
 
@@ -6,21 +6,21 @@
 
 ## What it is
 
-Mailtap turns scattered email accounts into one clean, queryable API. Point it at a mailbox and your agents read that mail as normalized JSON — no raw IMAP, no MIME parsing, no per-provider quirks.
+Mailtapper turns scattered email accounts into one clean, queryable API. Point it at a mailbox and your agents read that mail as normalized JSON — no raw IMAP, no MIME parsing, no per-provider quirks.
 
-It's deliberately narrow: the long tail of **non-Gmail, non-Microsoft 365** mailboxes — the hosted/cPanel IMAP boxes (GoDaddy, 20i, Bluehost, Hostinger…) that other tools ignore because they're unglamorous to support. Gmail and M365 are already solved everywhere; Mailtap is for everything else.
+It's deliberately narrow: the long tail of **non-Gmail, non-Microsoft 365** mailboxes — the hosted/cPanel IMAP boxes (GoDaddy, 20i, Bluehost, Hostinger…) that other tools ignore because they're unglamorous to support. Gmail and M365 are already solved everywhere; Mailtapper is for everything else.
 
 ## What it is *not*
 
 - **Not a mail client / inbox app** — there's no reading UI; it's infrastructure other tools call.
-- **Not a store or archive of your mail** — the mailbox is the source of truth. Mailtap fetches on demand and caches only briefly (seconds–minutes) for speed; the *caller* owns anything it keeps.
+- **Not a store or archive of your mail** — the mailbox is the source of truth. Mailtapper fetches on demand and caches only briefly (seconds–minutes) for speed; the *caller* owns anything it keeps.
 - **Not a sender** — v1 reads mail; it does not send.
 
 ## How it works
 
 ```
-[ IMAP / POP mailboxes ] ──▶ [ Mailtap API ] ──▶ [ your agent / automation ]
-   cPanel, 20i, GoDaddy…       fetch + normalize       reads clean JSON
+[ IMAP / POP mailboxes ] ──▶ [ Mailtapper API ] ──▶ [ your agent / automation ]
+   cPanel, 20i, GoDaddy…        fetch + normalize        reads clean JSON
 ```
 
 - **Control plane** — register a mailbox once (host, port, explicit TLS mode, username, password). Credentials are validated before saving and encrypted at rest.
@@ -31,9 +31,10 @@ It's deliberately narrow: the long tail of **non-Gmail, non-Microsoft 365** mail
 
 ```json
 {
+  "id": "opaque-locator",
   "internal_id": "…",
   "source_account": "you@yourdomain.com",
-  "provider": "imap",
+  "provider": "imap_generic",
   "from": { "name": "Jane", "email": "jane@example.com" },
   "subject": "Project update",
   "received_at": "2026-06-21T11:30:00Z",
@@ -44,7 +45,7 @@ It's deliberately narrow: the long tail of **non-Gmail, non-Microsoft 365** mail
 
 ## Security posture
 
-Mailtap holds mailbox **credentials**, not mailbox **contents**. Secrets are encrypted at rest (AES-256-GCM, envelope-encrypted with per-tenant keys); mail is fetched live, not stored. Access is via per-tenant API keys.
+Mailtapper holds mailbox **credentials**, not mailbox **contents**. Secrets are encrypted at rest (AES-256-GCM, envelope-encrypted with per-tenant keys); mail is fetched live, not stored. Access is via per-tenant API keys.
 
 ## Stack
 
