@@ -11,6 +11,7 @@ import { testImapConnection } from "../imap/validator.js";
 import { getOrCreateTenantDek, loadDekById, encryptSecret, decryptSecret } from "../crypto/envelope.js";
 import { searchAndFetch, fetchOne, type FetchTarget } from "../imap/fetch.js";
 import { decodeLocator } from "../imap/locator.js";
+import { decodeCursor, encodeCursor } from "./cursor.js";
 import { forbidden, notFound } from "../util.js";
 import type { Connection } from "../db/schema.js";
 import type { UnifiedMessage } from "../imap/normalize.js";
@@ -153,21 +154,62 @@ export async function registerRoutes(app: FastifyInstance) {
       );
     if (q.connection_id && targets.length === 0) throw notFound("Connection not found");
 
+    const cursor = q.cursor ? decodeCursor(q.cursor) : null;
     const query = { since, from: q.from, unread: q.unread === "true", subject: q.subject, limit };
 
-    // Fan out across connections, bounded by the tier's concurrency cap.
-    const all: UnifiedMessage[] = [];
+    // Fan out (bounded by the tier's concurrency cap); collect candidates tagged by connection + uid.
+    const tagged: { connId: string; uid: number; message: UnifiedMessage }[] = [];
+    const validities: Record<string, number> = {};
     const cap = TIERS[a.tier].concurrency;
     for (let i = 0; i < targets.length; i += cap) {
       const batch = await Promise.all(
-        targets.slice(i, i + cap).map(async (c) => searchAndFetch(await buildTarget(c, a.tenantId), query)),
+        targets.slice(i, i + cap).map(async (c) => {
+          const prev = cursor?.conns[c.id];
+          const page = await searchAndFetch(await buildTarget(c, a.tenantId), query, {
+            afterUid: prev?.uid,
+            expectUidValidity: prev?.uidValidity,
+          });
+          return { id: c.id, page };
+        }),
       );
-      for (const arr of batch) all.push(...arr);
+      for (const { id, page } of batch) {
+        validities[id] = page.uidValidity;
+        for (const cand of page.candidates) tagged.push({ connId: id, uid: cand.uid, message: cand.message });
+      }
     }
 
-    all.sort((x, y) => (x.received_at < y.received_at ? 1 : -1));
-    // TODO(pagination): emit a keyset next_cursor on (received_at, id) for cross-connection paging.
-    const payload = { data: all.slice(0, limit), next_cursor: null };
+    // Global keyset order: newest received_at first, stable tie-break by id.
+    tagged.sort((x, y) =>
+      x.message.received_at === y.message.received_at
+        ? x.message.id < y.message.id
+          ? 1
+          : -1
+        : x.message.received_at < y.message.received_at
+          ? 1
+          : -1,
+    );
+    const pageItems = tagged.slice(0, limit);
+
+    // Next cursor: each connection's lowest emitted uid becomes its new ceiling; carry prior
+    // ceilings for connections that emitted nothing this page so their candidates re-compete.
+    let next_cursor: string | null = null;
+    if (pageItems.length === limit) {
+      const conns: Record<string, { uid: number; uidValidity: number }> = {};
+      if (cursor) {
+        for (const [id, st] of Object.entries(cursor.conns)) {
+          if (validities[id] !== undefined) conns[id] = st;
+        }
+      }
+      for (const item of pageItems) {
+        const uv = validities[item.connId];
+        if (uv === undefined) continue;
+        const existing = conns[item.connId];
+        if (!existing || item.uid < existing.uid) conns[item.connId] = { uid: item.uid, uidValidity: uv };
+      }
+      next_cursor = encodeCursor({ v: 1, conns });
+    }
+
+    const payload = { data: pageItems.map((item) => item.message), next_cursor };
     messageCache.set(cacheKey, payload);
     return payload;
   });

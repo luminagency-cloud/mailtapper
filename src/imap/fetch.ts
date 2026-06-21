@@ -58,26 +58,53 @@ async function withClient<T>(t: FetchTarget, fn: (c: ImapFlow) => Promise<T>): P
   );
 }
 
-/** Live SEARCH + FETCH the newest matching page of INBOX, normalized. */
-export async function searchAndFetch(t: FetchTarget, q: SearchQuery): Promise<UnifiedMessage[]> {
+export interface Candidate {
+  message: UnifiedMessage;
+  uid: number;
+}
+
+export interface ConnPage {
+  uidValidity: number;
+  candidates: Candidate[];
+}
+
+/**
+ * Live SEARCH + FETCH the newest matching page of INBOX for one connection.
+ * Keyset paging: `afterUid` caps to messages older than this connection's cursor
+ * boundary. If the mailbox's uidvalidity changed since the cursor was issued, the
+ * boundary is ignored (restart this connection from the newest). Assumes UID order
+ * ~= arrival order within a mailbox (true for normal INBOXes).
+ */
+export async function searchAndFetch(
+  t: FetchTarget,
+  q: SearchQuery,
+  opts: { afterUid?: number; expectUidValidity?: number } = {},
+): Promise<ConnPage> {
   return withClient(t, async (client) => {
     const lock = await client.getMailboxLock("INBOX");
     try {
       const mailbox = client.mailbox;
       if (!mailbox) throw upstream("INBOX could not be opened");
       const uidValidity = Number(mailbox.uidValidity);
+      const ceiling =
+        opts.expectUidValidity !== undefined && opts.expectUidValidity !== uidValidity ? undefined : opts.afterUid;
+
       const criteria: SearchObject = { since: q.since };
       if (q.unread) criteria.seen = false;
       if (q.from) criteria.from = q.from;
       if (q.subject) criteria.subject = q.subject;
 
-      const uids = (await client.search(criteria, { uid: true })) || [];
-      const page = uids.slice(-q.limit).reverse(); // newest first
-      const out: UnifiedMessage[] = [];
+      let uids = (await client.search(criteria, { uid: true })) || [];
+      uids.sort((x, y) => x - y); // ascending; uid asc ~= arrival asc
+      if (ceiling !== undefined) uids = uids.filter((u) => u < ceiling);
+      const page = uids.slice(-q.limit).reverse(); // newest `limit`, newest first
+
+      const candidates: Candidate[] = [];
       for await (const msg of client.fetch(page, { uid: true, source: true, flags: true }, { uid: true })) {
         if (!msg.source) continue;
-        out.push(
-          await normalizeMessage(msg.source, {
+        candidates.push({
+          uid: msg.uid,
+          message: await normalizeMessage(msg.source, {
             connectionId: t.connectionId,
             sourceAccount: t.sourceAccount,
             provider: t.provider,
@@ -86,9 +113,9 @@ export async function searchAndFetch(t: FetchTarget, q: SearchQuery): Promise<Un
             uidValidity,
             isUnread: !msg.flags?.has("\\Seen"),
           }),
-        );
+        });
       }
-      return out;
+      return { uidValidity, candidates };
     } finally {
       lock.release();
     }
