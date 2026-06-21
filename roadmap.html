@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>mailtapper — Roadmap</title>
+<style>
+  :root {
+    --ink: #1a1d24; --muted: #5b6573; --line: #e4e7ec; --bg: #fbfcfd;
+    --accent: #25636b; --chip: #eef3f4; --ok: #1a7f53; --warn: #9a6a00; --code: #f3f5f7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 56px 24px 96px; }
+  header { border-bottom: 2px solid var(--ink); padding-bottom: 18px; margin-bottom: 8px; }
+  h1 { font-size: 30px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 15px; margin: 0; }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 10px; }
+  section { padding: 26px 0; border-bottom: 1px solid var(--line); }
+  h2 { font-size: 20px; margin: 0 0 12px; letter-spacing: -0.01em; }
+  h2 .num { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: 8px; }
+  p { margin: 0 0 12px; }
+  ul { margin: 0 0 12px; padding-left: 20px; }
+  li { margin: 4px 0; }
+  strong { font-weight: 650; }
+  code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 13px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0 14px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--chip); font-weight: 650; }
+  .ok { color: var(--ok); font-weight: 650; }
+  .warn { color: var(--warn); font-weight: 650; }
+  .lead { background: #fff; border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    padding: 14px 16px; border-radius: 6px; color: var(--muted); font-size: 14px; }
+  footer { color: var(--muted); font-size: 13px; margin-top: 28px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🗺️ mailtapper — Roadmap</h1>
+    <p class="sub">An access layer for email. Living roadmap — v1 is committed; everything below is directional.</p>
+    <p class="meta">Canonical source of truth. Mirrored from the project roadmap. Last synced 2026‑06‑21.</p>
+  </header>
+
+  <section>
+    <h2>How to read this</h2>
+    <p>A living roadmap so nothing gets lost. <strong>v1 is committed scope</strong>; everything below it is <em>directional</em> — captured so we don't forget it, not promised to a date. Update as decisions land.</p>
+    <p class="lead">Naming note: "v1" here is the genuine <strong>first software release</strong>. (An old "v3" label seen earlier was a strategy-concept number, not a version.)</p>
+  </section>
+
+  <section>
+    <h2><span class="num">0</span>Phase 0 — Dogfood (build for yourself first)</h2>
+    <p>v1's first user and consumer is the founder, dogfooding through <strong>luminmail</strong> — the existing webmail app, repurposed as a thin test client (one-line swap of its sync to <code>GET /v1/messages</code>). That real, in-use path is the v1 validation: if luminmail reliably reads mail through mailtapper, the approach is proven.</p>
+    <p>The larger <strong>AI life-planning app is the motivating use case but is NOT built yet</strong> — it becomes a consumer later, not a v1 dependency.</p>
+    <p>External market validation (the 5-qualified-yeses community test) is <strong>deferred to v2</strong> — relevant only when deciding to productize mailtapper for other people. The Validation Test Kit stays parked. For now, adoption by others is an explicit non-goal — the only success metric is "luminmail reads my mail through mailtapper."</p>
+  </section>
+
+  <section>
+    <h2><span class="num">1</span>v1 — Committed scope</h2>
+    <p><strong>Identity:</strong> an access layer / fetch service. Not a mail client, not a store. The mailbox is the source of truth; the caller owns durable data.</p>
+    <ul>
+      <li><strong>IMAP only, read-only.</strong></li>
+      <li><strong>Model: access layer + thin cache</strong> — live fetch on demand; connection hygiene (per-host connection reuse, concurrency cap, retry + backoff); short-TTL cache. <strong>No long-term mail storage.</strong></li>
+      <li><strong>Control plane:</strong> register/manage connections — host, port, <strong>explicit TLS mode</strong> (ssl / starttls / none), allow-invalid-cert, username, password. Validated before save, encrypted at rest.</li>
+      <li><strong>Data plane:</strong> query normalized mail by account, sender, time window, unread, full-text → one <strong>unified JSON</strong> shape.</li>
+      <li><strong>Unified message:</strong> content-hash <code>internal_id</code> (caller dedupe) + opaque <code>id</code> locator (live single-message re-fetch), <code>provider</code> tag, <code>has_attachments</code> + metadata, clean <strong>HTML-stripped</strong> <code>body_text</code>.</li>
+      <li><strong>Security:</strong> per-tenant API keys (hashed, scoped); envelope encryption (KEK→DEK, AAD, key-version rotation path).</li>
+      <li><strong>Scope:</strong> INBOX first.</li>
+      <li><strong>Stack:</strong> Node/TS · Fastify · ImapFlow · Postgres (Neon now) · Docker + Caddy.</li>
+      <li><strong>Human surface:</strong> API-first, plus a thin connection-manager view.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span>Cost &amp; abuse guardrails (v1)</h2>
+    <p><strong>Principle: mailbox size is not your cost — query breadth is.</strong> Connecting a 30k-message mailbox costs ~nothing (we don't slurp or store it). Cost is per-fetch compute + egress, only on what's fetched. So bound <em>fetches</em>, not mailbox size. No LLM cost — the caller pays for its own AI.</p>
+    <p>Guardrails (cheap, structural — build even for a single user): no unbounded fetch (enforced pagination + default recent window); per-tier lookback cap; per-key rate limits + per-tenant concurrency cap; per-tier connection cap; thin cache absorbs repeats. Heavy-user escape valve = <strong>self-host</strong>, not BYOK.</p>
+    <p><strong>Starting tier numbers</strong> (provisional — pricing is a separate open decision):</p>
+    <table>
+      <tr><th>Lever</th><th>Free</th><th>Pro</th><th>Scale</th><th>Self-host</th></tr>
+      <tr><td>Connections</td><td>3</td><td>50</td><td>250</td><td>Unlimited</td></tr>
+      <tr><td>Lookback (max since)</td><td>14 days</td><td>90 days</td><td>365 days</td><td>Unlimited</td></tr>
+      <tr><td>Page size (default/max)</td><td>25 / 50</td><td>25 / 100</td><td>25 / 200</td><td>Configurable</td></tr>
+      <tr><td>Rate limit</td><td>10/min</td><td>120/min</td><td>600/min</td><td>—</td></tr>
+      <tr><td>Daily requests</td><td>1,000</td><td>50,000</td><td>250,000</td><td>—</td></tr>
+      <tr><td>Concurrent fetches</td><td>2</td><td>10</td><td>30</td><td>Configurable</td></tr>
+    </table>
+    <p>Enforcement: defaults (last 7 days, 25/page) apply when params are omitted. Rate → <code>429</code> + Retry-After. Lookback beyond tier → <code>403</code> + upgrade hint. Page over max → clamp. Connection cap → blocked at creation.</p>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span>Not in v1 — but coming</h2>
+    <table>
+      <tr><th>Feature</th><th>Why it's deferred</th></tr>
+      <tr><td><strong>POP3 support</strong></td><td>v1 is IMAP-first; POP3 is the next protocol to add.</td></tr>
+      <tr><td><strong>Webhooks / push</strong></td><td>Needs a per-connection cursor + a worker. → <strong>v3 candidate, demand-gated</strong> (put it on a public roadmap; build only if people ask).</td></tr>
+      <tr><td><strong>Multi-folder + labels</strong></td><td>Keep v1 tight; INBOX covers the core use.</td></tr>
+      <tr><td><strong>Attachment fetch (bytes)</strong></td><td>v1 surfaces attachment <em>metadata</em> only; downloading comes later.</td></tr>
+      <tr><td><strong>Microsoft 365 &amp; Gmail (OAuth)</strong></td><td>Basic-Auth deprecation forces OAuth; the wedge is non-Google/non-MS first.</td></tr>
+      <tr><td><strong>Sending (SMTP) + mark-read write-back</strong></td><td>v1 is read-only; mutating the mailbox is a separate, later capability.</td></tr>
+      <tr><td><strong>Self-hosted deploy + Neon→local PG</strong></td><td>Planned; vanilla Postgres only, so the move is a connection-string swap.</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span>v2 &amp; directional</h2>
+    <ul>
+      <li><strong>Optional longer per-tenant retention</strong> — the "memory access layer" option: let callers have mailtapper hold a window of mail, not just pass through. Opt-in, never default.</li>
+      <li><strong>KMS-hosted KEK</strong> + automated periodic key rotation + per-key IP allowlists.</li>
+      <li><strong>Connection diagnostic tool</strong> — probe a mailbox for TLS/folder/UID quirks. Support tooling <em>and</em> the long-tail moat.</li>
+      <li><strong>Distribution:</strong> OpenAPI docs, an n8n node / Make module, client SDKs.</li>
+      <li><strong>Multi-worker scale-out</strong> — once push/polling load justifies it.</li>
+      <li><strong>External market validation &amp; GTM</strong> — the 5-yes community test + Validation Test Kit, when productizing for others.</li>
+      <li><strong>Pricing productization</strong> — per-connection base + volume tiers.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span>Open decisions</h2>
+    <table>
+      <tr><th>Decision</th><th>Status</th></tr>
+      <tr><td><strong>Pull-only vs push</strong></td><td><span class="ok">✓ Resolved</span> — pull-only for v1. Push → v3 candidate, demand-gated.</td></tr>
+      <tr><td><strong>Name</strong></td><td><span class="ok">✓ Resolved</span> — mailtapper.</td></tr>
+      <tr><td><strong>External validation (5-yes test)</strong></td><td>Deferred to <strong>v2</strong> — v1 is dogfood-for-self.</td></tr>
+      <tr><td><strong>v1 audience / consumer</strong></td><td><span class="ok">✓ Resolved</span> — the founder only, dogfooded via luminmail (built testbed + first consumer). AI planner is a future consumer, not yet built.</td></tr>
+      <tr><td><strong>Pricing model shape</strong></td><td><span class="warn">Open</span> — per-connection + volume sketch only.</td></tr>
+      <tr><td><strong>Neon → local Postgres timing</strong></td><td><span class="warn">Open</span> — Neon now, local "when ready."</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2><span class="num">6</span>Parking lot (don't lose these)</h2>
+    <ul>
+      <li><strong>luminmail = first test client</strong> — one-line swap (its sync → <code>GET /v1/messages</code>) to prove the data plane end-to-end. Throwaway otherwise.</li>
+      <li><strong>Lifted-and-fixed assets</strong> from luminmail: the IMAP connection validator and the AES-256-GCM crypto.</li>
+      <li><strong>Competitor intel:</strong> mailbridge.app solves the same problem but is <strong>locked to Gmail</strong> — validates the wedge and underlines the non-Gmail differentiator.</li>
+      <li><strong>Raw RFC-822 retain toggle</strong> — short-TTL only, for debugging/reprocessing; off by default.</li>
+      <li><strong>"Memory access layer"</strong> is the positioning phrase — mailtapper is the lens, not the warehouse.</li>
+      <li><strong>Loose ends:</strong> register mailtapper.com; claim the <code>mailtapper</code> npm name if publishing an SDK.</li>
+    </ul>
+  </section>
+
+  <footer>mailtapper — generated roadmap snapshot. The authoritative working copy lives in the project workspace; keep this file in sync on material changes.</footer>
+</div>
+</body>
+</html>
