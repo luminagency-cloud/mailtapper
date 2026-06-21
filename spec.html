@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>mailtapper — Build Spec (v1)</title>
+<style>
+  :root { --ink:#1a1d24; --muted:#5b6573; --line:#e4e7ec; --bg:#fbfcfd; --accent:#25636b; --chip:#eef3f4; --code:#f3f5f7; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:880px; margin:0 auto; padding:56px 24px 96px; }
+  header { border-bottom:2px solid var(--ink); padding-bottom:18px; margin-bottom:8px; }
+  h1 { font-size:30px; margin:0 0 4px; letter-spacing:-0.01em; }
+  .sub { color:var(--muted); font-size:15px; margin:0; }
+  .meta { color:var(--muted); font-size:13px; margin-top:10px; }
+  h2 { font-size:21px; margin:34px 0 12px; padding-top:18px; border-top:1px solid var(--line); letter-spacing:-0.01em; }
+  h2:first-of-type { border-top:none; padding-top:0; }
+  h3 { font-size:16px; margin:18px 0 8px; }
+  p { margin:0 0 12px; }
+  ul { margin:0 0 12px; padding-left:20px; }
+  li { margin:4px 0; }
+  strong { font-weight:650; }
+  code { background:var(--code); padding:1px 5px; border-radius:4px; font-size:13px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+  pre { background:#0f1729; color:#e6edf3; padding:16px 18px; border-radius:8px; overflow-x:auto; margin:0 0 16px; line-height:1.5; }
+  pre code { background:none; color:inherit; padding:0; font-size:12.5px; white-space:pre; }
+  table { border-collapse:collapse; width:100%; margin:8px 0 16px; font-size:14px; }
+  th, td { text-align:left; padding:8px 10px; border:1px solid var(--line); vertical-align:top; }
+  th { background:var(--chip); font-weight:650; }
+  footer { color:var(--muted); font-size:13px; margin-top:32px; border-top:1px solid var(--line); padding-top:16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🛠️ mailtapper — Build Spec (v1)</h1>
+    <p class="sub">An access layer for email. Canonical v1 build spec — access-layer model, live fetch, no stored mail.</p>
+    <p class="meta">Portable snapshot. Authoritative working copy lives in the project workspace. Last synced 2026‑06‑21.</p>
+  </header>
+<h2>Overview &amp; Principles</h2>
+<p><strong>Mailtapper</strong> is an access layer for email: connect any IMAP mailbox and read it as clean, unified JSON through one API. Built for AI agents and automations, not humans. This is the <strong>v1</strong> build spec.</p>
+<p><strong>Model: access layer (live fetch + thin cache).</strong> Mailtapper fetches from the mailbox on demand, normalizes, and returns — it does <strong>not</strong> store mail. The mailbox is the source of truth; the caller owns any durable copy. A short-TTL cache and a connection-hygiene layer make live fetch fast and resilient.</p>
+<p><strong>Principles</strong></p>
+<ul>
+<li><strong>Fetch service, not a store.</strong> No mail database, no retention. Minimal liability: we hold credentials, not contents.</li>
+<li><strong>Bounded by default.</strong> No "give me everything" call — every query is windowed, paginated, and capped.</li>
+<li><strong>Multi-tenant from row one</strong>, per-tenant API keys.</li>
+<li><strong>Built to hold credentials safely:</strong> explicit per-connection TLS, envelope-encrypted secrets.</li>
+</ul>
+<p><strong>Stack:</strong> Node 20 + TypeScript, Fastify, ImapFlow, mailparser + html-to-text, Postgres (Neon now; vanilla SQL so it ports to a local container), Docker + Caddy on the Ubuntu host.</p>
+<p><strong>Not in v1:</strong> push/webhooks, POP3, multi-folder, attachment bytes, sending, OAuth providers (Gmail/M365), self-host, metered billing — see the Roadmap.</p>
+<h2>Architecture</h2>
+<pre><code>                          rate-limit / authz / clamp to tier caps
+caller (AI / automation) --&gt;
+   GET /v1/messages       --&gt; cache? --hit--&gt; return
+                                   | miss
+                                   v
+                          connection-hygiene layer
+                          (pooled IMAP conns / concurrency cap / retry+backoff)
+                                   v
+                          live IMAP:  SEARCH -&gt; FETCH -&gt; normalize -&gt; unified JSON
+                                   v
+                          cache (short TTL) --&gt; return { data, next_cursor }</code></pre>
+<p><strong>Components (Docker)</strong></p>
+<table>
+<tr><th>Service</th><th>Role</th></tr>
+<tr><td>api</td><td>Fastify; serves control + data plane; holds the in-memory cache and the IMAP connection pool. Stateless across restarts.</td></tr>
+<tr><td>caddy</td><td>Reverse proxy + automatic HTTPS for api.yourdomain.com.</td></tr>
+<tr><td>db</td><td>Postgres (Neon). Tiny — connections + keys only, no mail.</td></tr>
+</table>
+<p><strong>No background worker in v1.</strong> Because we don't store or push, there's nothing to poll on a schedule — fetching happens inside the request. (A worker returns only if push/webhooks are added later.)</p>
+<h2>Data Model</h2>
+<p>No <code>messages</code> or <code>sync_state</code> tables — we don't store mail. The DB holds config + credentials only.</p>
+<pre><code>CREATE TABLE tenants (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  tier text NOT NULL DEFAULT 'free',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE api_keys (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  key_prefix text NOT NULL,            -- e.g. 'mtapper_live_AbCd1234'
+  key_hash   text NOT NULL,            -- sha256(full key)
+  scopes     text[] NOT NULL DEFAULT '{messages:read}',
+  last_used_at timestamptz, last_used_ip inet,
+  created_at timestamptz NOT NULL DEFAULT now(), revoked_at timestamptz,
+  UNIQUE (key_prefix)
+);
+
+CREATE TABLE tenant_keys (             -- envelope encryption (see Credential Security)
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  dek_wrapped bytea NOT NULL, dek_iv bytea NOT NULL,
+  kek_version int NOT NULL, dek_version int NOT NULL,
+  retired_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE connections (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  label text,
+  protocol text NOT NULL DEFAULT 'imap' CHECK (protocol IN ('imap')),  -- pop3 later
+  host text NOT NULL, port integer NOT NULL,
+  tls_mode text NOT NULL DEFAULT 'ssl' CHECK (tls_mode IN ('ssl','starttls','none')),
+  allow_invalid_cert boolean NOT NULL DEFAULT false,
+  username text NOT NULL,
+  secret_ciphertext bytea NOT NULL, secret_iv bytea NOT NULL,
+  secret_dek_id uuid REFERENCES tenant_keys(id),
+  provider text NOT NULL DEFAULT 'imap_generic',
+  source_account text NOT NULL,
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','active','error','paused')),
+  last_error text, last_validated_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, username, host)
+);</code></pre>
+<p>The thin cache is in-memory (single-node) in v1 — no table. Redis/Postgres-backed cache only if/when we run multiple api nodes.</p>
+<h2>The Unified Message (contract)</h2>
+<p><strong>Two ids, two jobs:</strong></p>
+<ul>
+<li><strong><code>id</code></strong> — an opaque locator encoding connection_id + folder + UID + uidvalidity, HMAC-signed. Use it for <code>GET /v1/messages/{id}</code> to re-fetch that exact message live. A stale locator (UIDs reset) returns <code>410 Gone</code> (re-query).</li>
+<li><strong><code>internal_id</code></strong> — a content hash (RFC Message-ID, else a from + date + subject + body fingerprint). For your dedupe across your store. We compute it on the fly; we don't store it.</li>
+</ul>
+<pre><code>{
+  "id": "b64url.signed.locator",
+  "internal_id": "sha256...",
+  "connection_id": "uuid",
+  "source_account": "you@yourdomain.com",
+  "provider": "imap_generic",
+  "folder": "INBOX",
+  "message_id": "&lt;abc@host&gt;",
+  "thread_id": "...",
+  "from": { "name": "Jane", "email": "jane@example.com" },
+  "to": [], "cc": [],
+  "subject": "Project update",
+  "received_at": "2026-06-21T11:30:00Z",
+  "body_text": "Clean, HTML-stripped text...",
+  "has_attachments": true,
+  "attachment_count": 2,
+  "attachments": [ { "filename": "po.pdf", "content_type": "application/pdf", "size_bytes": 18234 } ],
+  "is_unread": true,
+  "size_bytes": 44120
+}</code></pre>
+<p><strong>Body:</strong> prefer the plain-text MIME part; else convert HTML to text. Raw HTML never lands in body_text. <strong>Attachments:</strong> metadata only in v1 (no bytes).</p>
+<h2>Control-Plane API</h2>
+<p>Base <code>/v1</code>; all endpoints require <code>Authorization: Bearer &lt;api_key&gt;</code>, scoped to the key's tenant.</p>
+<table>
+<tr><th>Method</th><th>Path</th><th>Purpose</th></tr>
+<tr><td>POST</td><td>/v1/connections</td><td>Register a mailbox. Validates IMAP before saving; encrypts the secret.</td></tr>
+<tr><td>GET</td><td>/v1/connections</td><td>List with status + last_validated_at + last_error.</td></tr>
+<tr><td>GET</td><td>/v1/connections/:id</td><td>Detail.</td></tr>
+<tr><td>PATCH</td><td>/v1/connections/:id</td><td>Update (re-validates if host/creds/tls change).</td></tr>
+<tr><td>DELETE</td><td>/v1/connections/:id</td><td>Remove (wipes the stored secret).</td></tr>
+<tr><td>POST</td><td>/v1/connections/:id/test</td><td>Re-run the connectivity diagnostic.</td></tr>
+</table>
+<pre><code>POST /v1/connections
+{ "label":"Work", "host":"mail.host.com", "port":993,
+  "tls_mode":"ssl", "allow_invalid_cert":false,
+  "username":"you@yourdomain.com", "password":"******",
+  "source_account":"you@yourdomain.com", "provider":"cpanel" }
+-&gt; 201 { "id":"uuid", "status":"active", ... }     // password never echoed
+-&gt; 422 { "error":"Authentication failed. Check the email address and password." }</code></pre>
+<p>API keys: <code>POST /v1/api-keys</code>, <code>GET /v1/api-keys</code>, <code>DELETE /v1/api-keys/:id</code> (rotate). First key seeded via CLI/env. Health: <code>GET /healthz</code> (unauthenticated).</p>
+<h2>Data-Plane API (live fetch)</h2>
+<p><strong><code>GET /v1/messages</code></strong> — live fetch, bounded. Filters map to IMAP SEARCH: since/until -&gt; SINCE/BEFORE, from -&gt; FROM, unread -&gt; UNSEEN, subject -&gt; SUBJECT, connection_id (one; omit = all the tenant's active connections), limit (default 25, tier max), cursor (keyset).</p>
+<pre><code>1. authz: api key -&gt; tenant; enforce rate limit; clamp limit to tier max
+2. clamp since to tier lookback cap (older -&gt; 403 + upgrade hint)
+3. cache hit? (tenant + normalized query) -&gt; return
+4. for each target connection (bounded by per-tenant concurrency cap), on a pooled IMAP conn:
+     SEARCH(filters) -&gt; matching UIDs (newest first)
+     take page window after cursor -&gt; FETCH headers+body -&gt; normalize
+5. merge across connections by received_at desc; apply limit
+6. cache (short TTL); return { data: [...], next_cursor }</code></pre>
+<p><strong>Pagination:</strong> keyset by (received_at, uid); next_cursor encodes position. <strong>Cross-account</strong> queries fan out per connection and merge — the heaviest call, which is exactly what the concurrency + connection caps bound.</p>
+<p><strong><code>GET /v1/messages/{id}</code></strong> — decode locator -&gt; authorize against the caller's tenant -&gt; live FETCH that UID -&gt; normalize. Stale uidvalidity -&gt; 410.</p>
+<p><strong>Search honesty (a real model trade-off):</strong> with no stored index, search is whatever IMAP SEARCH supports. since/until/from/unread/subject are reliable everywhere. Full-body text (q) maps to IMAP TEXT/BODY, which is server-dependent and can be slow — so v1 offers it best-effort and documents it may be unsupported on some hosts. Fast, rich cross-account full-text is the main capability we trade away by not storing; an opt-in stored-index tier could add it back later.</p>
+<h2>Limits &amp; Guardrails</h2>
+<p><strong>Principle: mailbox size is not your cost — query breadth is.</strong> Connecting a 30k-message mailbox costs ~nothing (we don't slurp it); cost is per-fetch compute/egress, only on what's fetched. So we bound fetches, not mailbox size. No LLM cost — the caller pays for its own AI.</p>
+<p><strong>Tier caps (starting numbers — provisional; pricing is a separate decision):</strong></p>
+<table>
+<tr><th>Lever</th><th>Free</th><th>Pro</th><th>Scale</th><th>Self-host</th></tr>
+<tr><td>Connections</td><td>3</td><td>50</td><td>250</td><td>Unlimited</td></tr>
+<tr><td>Lookback (max since)</td><td>14 days</td><td>90 days</td><td>365 days</td><td>Unlimited</td></tr>
+<tr><td>Page size (default/max)</td><td>25 / 50</td><td>25 / 100</td><td>25 / 200</td><td>Configurable</td></tr>
+<tr><td>Rate limit</td><td>10/min</td><td>120/min</td><td>600/min</td><td>—</td></tr>
+<tr><td>Daily requests</td><td>1,000</td><td>50,000</td><td>250,000</td><td>—</td></tr>
+<tr><td>Concurrent fetches</td><td>2</td><td>10</td><td>30</td><td>Configurable</td></tr>
+</table>
+<p><strong>Enforcement:</strong> defaults (last 7 days, 25/page) apply when params are omitted, regardless of tier — the tier sets the ceiling. Rate hit -&gt; 429 + Retry-After. Lookback beyond tier -&gt; 403 + upgrade hint. Page over max -&gt; clamp. Connection cap -&gt; blocked at creation with upgrade prompt. <strong>Heavy-user valve = self-host</strong> (not BYOK — there's no per-request vendor key; the cost is compute). Future metered dimension: messages fetched/month (deferred with billing).</p>
+<h2>Connector &amp; Normalizer</h2>
+<p><strong>Validator</strong> (lifted from luminmail, fixed — explicit TLS, IMAP-only, timeouts):</p>
+<pre><code>const client = new ImapFlow({
+  host: c.host, port: c.port,
+  secure: c.tlsMode === "ssl",                 // explicit -- never derived from the port
+  tls: { rejectUnauthorized: !c.allowInvalidCert },
+  connectionTimeout: 10_000, greetingTimeout: 7_000, socketTimeout: 30_000,
+  auth: { user: c.username, pass }, logger: false,
+});</code></pre>
+<p><code>formatMailError</code> keeps luminmail's buckets (auth/timeout/DNS/TLS) + adds econnrefused and self-signed-cert ("-&gt; enable allow_invalid_cert").</p>
+<p><strong>Normalizer</strong> (runs in the request path): <code>simpleParser(raw)</code> -&gt; prefer .text, else <code>html-to-text(.html)</code>; map addresses; detect attachments -&gt; metadata; compute internal_id; build the signed id locator; derive thread_id. HTML-strip + attachment detection are the two things luminmail never did.</p>
+<p><strong>internal_id:</strong> messageId ? "mid:" + lower(messageId) : "fp:" + sha256(from|dateISO|subject|sha256(bodyText)), then sha256(connection_id + "\n" + that).</p>
+<h2>Credential Security</h2>
+<p>We hold mailbox credentials, not contents — so this is the crown jewel.</p>
+<ul>
+<li><strong>Envelope encryption (KEK -&gt; DEK).</strong> Master KEK (32 random bytes) lives outside the DB — env MAILTAPPER_KEK_B64 now, KMS later; loaded as a versioned keyring. Per-tenant DEK (random 32 bytes) encrypts secrets and is stored wrapped by the KEK in tenant_keys.</li>
+<li><strong>Cipher:</strong> AES-256-GCM, random 12-byte IV, AAD = conn:&lt;connection_id&gt; so ciphertext can't be transplanted between rows/tenants.</li>
+<li><strong>Rotation:</strong> kek_version / dek_version columns + keyring let old and new coexist — rotate the KEK by re-wrapping DEKs; rotate a DEK by re-encrypting one tenant's secrets. No big-bang.</li>
+<li><strong>API keys:</strong> mtapper_live_&lt;32 random bytes&gt;; store sha256(key) + prefix; verify constant-time; scoped (messages:read for read-only callers like luminmail). Shown once.</li>
+<li><strong>Point-of-use only:</strong> secrets decrypted in-memory at fetch time, never logged or persisted; deleting a connection wipes its secret.</li>
+</ul>
+<h2>Connection Hygiene &amp; Cache</h2>
+<p>The layer that makes live fetch fast and survivable on flaky long-tail hosts (and answers the "12 timeouts in a row" worry).</p>
+<ul>
+<li><strong>Connection pool:</strong> reuse ImapFlow connections per (host, username) instead of reconnecting each call.</li>
+<li><strong>Concurrency caps:</strong> per host and per tenant (tier-driven) — never open a storm of sockets to one server (that's what causes the timeouts/bans).</li>
+<li><strong>Retry with backoff + jitter:</strong> on transient errors, a few retries with growing delay — not 12 instant hammers. Hard failures surface as a clear error + set the connection status='error'.</li>
+<li><strong>Timeouts</strong> on connect/greeting/socket so a dead host fails fast.</li>
+<li><strong>Thin cache:</strong> in-memory LRU keyed by (tenant, normalized-query) and by (connection, uid) for single messages; short TTL (default ~60s, configurable). Wipeable at any instant with zero data loss — the mailbox is always the source of truth. It is a performance buffer, not storage.</li>
+</ul>
+<h2>Deployment</h2>
+<p>All on the Ubuntu/Docker host. No worker in v1.</p>
+<pre><code>services:
+  api:
+    build: .
+    command: node dist/api.js
+    environment:
+      DATABASE_URL: ${DATABASE_URL}                 # Neon (vanilla PG -&gt; portable to local later)
+      MAILTAPPER_KEK_B64: ${MAILTAPPER_KEK_B64}      # 32 random bytes, base64 (openssl rand -base64 32)
+      MAILTAPPER_LOCATOR_SECRET: ${LOCATOR_SECRET}   # HMAC key for the message id locator
+      PUBLIC_BASE_URL: https://api.yourdomain.com
+    expose: ["3000"]
+  caddy:
+    image: caddy:2
+    ports: ["80:80","443:443"]
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile","caddy_data:/data"]
+volumes: { caddy_data: {} }</code></pre>
+<p>Migrations via Drizzle on deploy. Moving Neon -&gt; local Postgres later is a DATABASE_URL swap (vanilla SQL, no Neon-specific features).</p>
+<h2>Scope &amp; Deferred</h2>
+<p><strong>v1 (this spec):</strong> IMAP, read-only, pull-only live fetch + thin cache, INBOX, bounded/paginated queries with tier caps, per-tenant scoped API keys, envelope-encrypted credentials, connection-hygiene layer. DB = config + keys only.</p>
+<p><strong>Decided: pull-only (no push) for v1.</strong> Callers poll the data plane on their own cadence; mailtapper holds no per-connection cursor and runs no background worker. Rationale: the ICP (polling agents/automations) doesn't need real-time delivery; push would reintroduce the worker + persistent cursor + delivery infra the access-layer model deliberately removed, and would invert the cost profile to continuous background IMAP polling. "Opt-in" would limit runtime load but not build scope. Deferring is free: push is purely additive (the read contract is unchanged).</p>
+<p><strong>Key trade-off accepted:</strong> no stored full-text index -&gt; search limited to IMAP SEARCH (reliable on headers/since/from/unread/subject; full-body best-effort).</p>
+<p><strong>Deferred (Roadmap):</strong> push/webhooks (v3 candidate, demand-gated), POP3, multi-folder, attachment bytes, Microsoft 365 &amp; Gmail (OAuth), sending, self-host, metered billing, optional stored-index/cache tier for rich search &amp; longer retention.</p>
+<p><strong>Open decisions still live:</strong> pricing model.</p>
+
+  <footer>mailtapper — generated spec snapshot. Keep in sync with the working copy on material changes.</footer>
+</div>
+</body>
+</html>
