@@ -1,4 +1,4 @@
-import type { ImapFlow } from "imapflow";
+import type { ImapFlow, SearchObject } from "imapflow";
 import { buildClient, formatMailError, type ConnCfg } from "./validator.js";
 import { normalizeMessage, type UnifiedMessage } from "./normalize.js";
 import { withRetry, upstream, gone } from "../util.js";
@@ -63,8 +63,10 @@ export async function searchAndFetch(t: FetchTarget, q: SearchQuery): Promise<Un
   return withClient(t, async (client) => {
     const lock = await client.getMailboxLock("INBOX");
     try {
-      const uidValidity = Number((client.mailbox as { uidValidity: number }).uidValidity);
-      const criteria: Record<string, unknown> = { since: q.since };
+      const mailbox = client.mailbox;
+      if (!mailbox) throw upstream("INBOX could not be opened");
+      const uidValidity = Number(mailbox.uidValidity);
+      const criteria: SearchObject = { since: q.since };
       if (q.unread) criteria.seen = false;
       if (q.from) criteria.from = q.from;
       if (q.subject) criteria.subject = q.subject;
@@ -98,8 +100,9 @@ export async function fetchOne(t: FetchTarget, folder: string, uid: number, uidV
   return withClient(t, async (client) => {
     const lock = await client.getMailboxLock(folder);
     try {
-      const currentValidity = Number((client.mailbox as { uidValidity: number }).uidValidity);
-      if (currentValidity !== uidValidity) throw gone();
+      const mailbox = client.mailbox;
+      if (!mailbox) throw gone();
+      if (Number(mailbox.uidValidity) !== uidValidity) throw gone();
       const msg = await client.fetchOne(String(uid), { uid: true, source: true, flags: true }, { uid: true });
       if (!msg || !msg.source) throw gone();
       return normalizeMessage(msg.source, {

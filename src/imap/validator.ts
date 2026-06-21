@@ -39,12 +39,11 @@ export function formatMailError(error: unknown): string {
 export async function testImapConnection(
   cfg: ConnCfg,
   password: string,
-): Promise<{ ok: true; capabilities: string[] } | { ok: false; message: string }> {
+): Promise<{ ok: true } | { ok: false; message: string }> {
   const client = buildClient(cfg, password);
   try {
     await client.connect();
-    const caps = client.capabilities ? Array.from(client.capabilities.keys()) : [];
-    return { ok: true, capabilities: caps };
+    return { ok: true };
   } catch (err) {
     return { ok: false, message: formatMailError(err) };
   } finally {

@@ -10,7 +10,7 @@ const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 function base62(bytes: Buffer): string {
   // Simple, non-padded base62 of the random bytes (collision-irrelevant; entropy is in the bytes).
   let out = "";
-  for (const b of bytes) out += BASE62[b % 62];
+  for (const b of bytes) out += BASE62.charAt(b % 62);
   return out;
 }
 

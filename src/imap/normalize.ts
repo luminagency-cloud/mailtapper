@@ -45,7 +45,7 @@ export async function normalizeMessage(rawSource: Buffer, ctx: NormalizeCtx) {
   const p = await simpleParser(rawSource);
 
   // Body: prefer the plain-text part; else strip HTML. Raw HTML never lands in body_text.
-  const bodyText = p.text?.trim() ? p.text : p.html ? htmlToText(p.html, { wordwrap: false }) : "";
+  const bodyText = p.text && p.text.trim() ? p.text : p.html ? htmlToText(p.html, { wordwrap: false }) : "";
 
   const receivedAt = p.date ?? new Date();
   const from = addrs(p.from)[0] ?? { name: null, email: null };
