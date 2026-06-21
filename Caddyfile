@@ -1,0 +1,4 @@
+# Replace with your real hostname. Caddy auto-provisions HTTPS.
+api.yourdomain.com {
+	reverse_proxy api:3000
+}
