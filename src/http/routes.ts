@@ -12,6 +12,7 @@ import { getOrCreateTenantDek, loadDekById, encryptSecret, decryptSecret } from 
 import { searchAndFetch, fetchOne, type FetchTarget } from "../imap/fetch.js";
 import { decodeLocator } from "../imap/locator.js";
 import { decodeCursor, encodeCursor } from "./cursor.js";
+import { dashboardHtml } from "./dashboard.js";
 import { forbidden, notFound } from "../util.js";
 import type { Connection } from "../db/schema.js";
 import type { UnifiedMessage } from "../imap/normalize.js";
@@ -53,6 +54,10 @@ const createBody = z.object({
 
 export async function registerRoutes(app: FastifyInstance) {
   app.get("/healthz", async () => ({ ok: true, service: "mailtapper", version: "0.1.0" }));
+
+  // The only human surface: a thin connection-manager page (served unauthenticated; it holds
+  // no secrets — the operator pastes an API key client-side for the /v1/* calls it makes).
+  app.get("/", async (_req, reply) => reply.type("text/html").send(dashboardHtml));
 
   async function loadConnection(id: string, tenantId: string): Promise<Connection> {
     const row = await db.query.connections.findFirst({

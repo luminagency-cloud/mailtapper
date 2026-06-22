@@ -11,7 +11,8 @@ export async function buildServer() {
 
   // Authenticate first (except health) so the rate limiter can scale by tenant tier.
   app.addHook("onRequest", async (req) => {
-    if (req.url.split("?")[0] === "/healthz") return;
+    const path = req.url.split("?")[0];
+    if (path === "/healthz" || path === "/") return; // health check + dashboard shell are unauthenticated
     await authenticate(req);
   });
 
