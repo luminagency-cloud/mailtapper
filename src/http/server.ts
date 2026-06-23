@@ -9,6 +9,19 @@ import { registerRoutes } from "./routes.js";
 export async function buildServer() {
   const app = Fastify({ logger: { level: env.LOG_LEVEL }, trustProxy: true });
 
+  // Tolerate an empty body on application/json requests (e.g. bodyless POSTs like
+  // /connections/:id/test or DELETE) instead of throwing FST_ERR_CTP_EMPTY_JSON_BODY.
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => {
+    const s = typeof body === "string" ? body.trim() : "";
+    if (!s) return done(null, undefined);
+    try {
+      done(null, JSON.parse(s));
+    } catch (err) {
+      (err as { statusCode?: number }).statusCode = 400;
+      done(err as Error, undefined);
+    }
+  });
+
   // Authenticate first (except health) so the rate limiter can scale by tenant tier.
   app.addHook("onRequest", async (req) => {
     const path = req.url.split("?")[0];
@@ -25,11 +38,13 @@ export async function buildServer() {
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof HttpError) return reply.code(err.status).send({ error: err.message, code: err.code });
-    if ((err as { statusCode?: number }).statusCode === 429) {
-      return reply.code(429).send({ error: "Rate limit exceeded", code: "rate_limited" });
-    }
     if ((err as { name?: string }).name === "ZodError") {
       return reply.code(400).send({ error: "Invalid request", code: "bad_request", details: (err as { issues?: unknown }).issues });
+    }
+    // Respect framework errors that carry a client (4xx) status — rate-limit 429, empty/bad JSON 400, etc.
+    const status = (err as { statusCode?: number }).statusCode;
+    if (typeof status === "number" && status >= 400 && status < 500) {
+      return reply.code(status).send({ error: err.message, code: (err as { code?: string }).code ?? "error" });
     }
     req.log.error(err);
     return reply.code(500).send({ error: "Internal error", code: "internal" });
