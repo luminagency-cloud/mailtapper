@@ -1,6 +1,6 @@
 {
   "name": "mailtapper",
-  "version": "0.1.8",
+  "version": "0.2.8",
   "private": true,
   "description": "An access layer for email — connect any IMAP mailbox and read it as clean, unified JSON.",
   "type": "module",

@@ -1,12 +1,13 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { and, eq, desc } from "drizzle-orm";
+import { and, eq, desc, isNull } from "drizzle-orm";
 import { db, schema } from "../db/client.js";
 import { requireScope } from "./auth.js";
 import { TIERS, clampLimit, resolveSince } from "./limits.js";
 import { env } from "../env.js";
 import { TtlCache } from "../cache/lru.js";
+import { generateApiKey } from "../crypto/apikeys.js";
 import { testImapConnection } from "../imap/validator.js";
 import { getOrCreateTenantDek, loadDekById, encryptSecret, decryptSecret } from "../crypto/envelope.js";
 import { searchAndFetch, fetchOne, type FetchTarget } from "../imap/fetch.js";
@@ -30,6 +31,12 @@ function publicConnection(c: Connection) {
   };
 }
 
+function maxDate(a: Date | null, b: Date | null): Date | null {
+  if (!a) return b;
+  if (!b) return a;
+  return a > b ? a : b;
+}
+
 async function buildTarget(c: Connection, tenantId: string): Promise<FetchTarget> {
   const dek = await loadDekById(c.secretDekId!, tenantId);
   const password = decryptSecret(c.secretCiphertext, c.secretIv, dek, c.id);
@@ -49,7 +56,28 @@ const createBody = z.object({
   username: z.string().min(1),
   password: z.string().min(1),
   source_account: z.string().optional(),
+  // API/provider tag. Defaults to imap_generic ("plain IMAP, no branded provider").
+  // The admin UI exposes this, if at all, as optional "Host name" metadata.
   provider: z.string().default("imap_generic"),
+});
+
+const updateBody = z.object({
+  label: z.string().nullable().optional(),
+  host: z.string().min(1).optional(),
+  port: z.number().int().positive().optional(),
+  tls_mode: z.enum(["ssl", "starttls", "none"]).optional(),
+  allow_invalid_cert: z.boolean().optional(),
+  username: z.string().min(1).optional(),
+  password: z.string().min(1).optional(),
+  source_account: z.string().min(1).optional(),
+  provider: z.string().min(1).optional(),
+});
+
+const userKeyScopes = ["connections:read", "connections:write", "messages:read"];
+
+const createClientBody = z.object({
+  name: z.string().min(1),
+  tier: z.enum(["free", "pro", "scale"]).default(env.DEFAULT_TIER),
 });
 
 export async function registerRoutes(app: FastifyInstance) {
@@ -68,6 +96,142 @@ export async function registerRoutes(app: FastifyInstance) {
   }
 
   // ---------- Control plane ----------
+  app.get("/v1/me", async (req) => {
+    const a = ctx(req);
+    return {
+      tenant_id: a.tenantId,
+      key_id: a.keyId,
+      tier: a.tier,
+      scopes: a.scopes,
+      is_admin: a.scopes.includes("admin"),
+    };
+  });
+
+  app.post("/v1/admin/clients", async (req, reply) => {
+    requireScope(req, "admin");
+    const body = createClientBody.parse(req.body ?? {});
+
+    const key = generateApiKey("live");
+    const tenant = await db.transaction(async (tx) => {
+      const [row] = await tx.insert(schema.tenants).values({ name: body.name, tier: body.tier }).returning();
+      await tx.insert(schema.apiKeys).values({
+        tenantId: row!.id,
+        keyPrefix: key.prefix,
+        keyHash: key.hash,
+        scopes: userKeyScopes,
+      });
+      return row!;
+    });
+
+    return reply.code(201).send({
+      id: tenant.id,
+      name: tenant.name,
+      tier: tenant.tier,
+      created_at: tenant.createdAt,
+      api_key: key.raw,
+      scopes: userKeyScopes,
+    });
+  });
+
+  app.get("/v1/admin/clients", async (req) => {
+    requireScope(req, "admin");
+
+    const [tenants, connections, apiKeys] = await Promise.all([
+      db.select().from(schema.tenants).orderBy(desc(schema.tenants.createdAt)),
+      db.select().from(schema.connections),
+      db.select().from(schema.apiKeys),
+    ]);
+
+    const connectionStats = new Map<
+      string,
+      {
+        total: number;
+        active: number;
+        error: number;
+        pending: number;
+        paused: number;
+        last_validated_at: Date | null;
+      }
+    >();
+    for (const c of connections) {
+      const stats =
+        connectionStats.get(c.tenantId) ??
+        { total: 0, active: 0, error: 0, pending: 0, paused: 0, last_validated_at: null };
+      stats.total += 1;
+      if (c.status === "active") stats.active += 1;
+      if (c.status === "error") stats.error += 1;
+      if (c.status === "pending") stats.pending += 1;
+      if (c.status === "paused") stats.paused += 1;
+      stats.last_validated_at = maxDate(stats.last_validated_at, c.lastValidatedAt);
+      connectionStats.set(c.tenantId, stats);
+    }
+
+    const keyStats = new Map<string, { total: number; active: number; last_used_at: Date | null }>();
+    for (const key of apiKeys) {
+      const stats = keyStats.get(key.tenantId) ?? { total: 0, active: 0, last_used_at: null };
+      stats.total += 1;
+      if (!key.revokedAt) stats.active += 1;
+      stats.last_used_at = maxDate(stats.last_used_at, key.lastUsedAt);
+      keyStats.set(key.tenantId, stats);
+    }
+
+    return {
+      data: tenants.map((tenant) => {
+        const connections =
+          connectionStats.get(tenant.id) ??
+          { total: 0, active: 0, error: 0, pending: 0, paused: 0, last_validated_at: null };
+        const api_keys = keyStats.get(tenant.id) ?? { total: 0, active: 0, last_used_at: null };
+        return {
+          id: tenant.id,
+          name: tenant.name,
+          tier: tenant.tier,
+          created_at: tenant.createdAt,
+          connections,
+          api_keys,
+          last_activity_at: maxDate(connections.last_validated_at, api_keys.last_used_at),
+        };
+      }),
+    };
+  });
+
+  app.post("/v1/admin/clients/:id/api-key/rotate", async (req) => {
+    requireScope(req, "admin");
+    const { id } = req.params as { id: string };
+
+    return db.transaction(async (tx) => {
+      const [tenant] = await tx.select().from(schema.tenants).where(eq(schema.tenants.id, id)).limit(1);
+      if (!tenant) throw notFound("Client not found");
+
+      const activeKeys = await tx
+        .select()
+        .from(schema.apiKeys)
+        .where(and(eq(schema.apiKeys.tenantId, id), isNull(schema.apiKeys.revokedAt)))
+        .orderBy(desc(schema.apiKeys.createdAt));
+
+      const scopes = activeKeys.length
+        ? Array.from(new Set(activeKeys.flatMap((key) => key.scopes)))
+        : userKeyScopes;
+
+      const key = generateApiKey("live");
+      await tx
+        .update(schema.apiKeys)
+        .set({ revokedAt: new Date() })
+        .where(and(eq(schema.apiKeys.tenantId, id), isNull(schema.apiKeys.revokedAt)));
+      await tx.insert(schema.apiKeys).values({
+        tenantId: id,
+        keyPrefix: key.prefix,
+        keyHash: key.hash,
+        scopes,
+      });
+
+      return {
+        client: { id: tenant.id, name: tenant.name, tier: tenant.tier },
+        api_key: key.raw,
+        scopes,
+      };
+    });
+  });
+
   app.post("/v1/connections", async (req, reply) => {
     const a = ctx(req);
     requireScope(req, "connections:write");
@@ -112,6 +276,69 @@ export async function registerRoutes(app: FastifyInstance) {
     return publicConnection(await loadConnection((req.params as { id: string }).id, a.tenantId));
   });
 
+  app.patch("/v1/connections/:id", async (req, reply) => {
+    const a = ctx(req);
+    requireScope(req, "connections:write");
+    const { id } = req.params as { id: string };
+    const c = await loadConnection(id, a.tenantId);
+    const body = updateBody.parse(req.body ?? {});
+
+    const effectiveCfg = {
+      host: body.host ?? c.host,
+      port: body.port ?? c.port,
+      tlsMode: body.tls_mode ?? c.tlsMode,
+      allowInvalidCert: body.allow_invalid_cert ?? c.allowInvalidCert,
+      username: body.username ?? c.username,
+    };
+    const connectionChanged =
+      body.host !== undefined ||
+      body.port !== undefined ||
+      body.tls_mode !== undefined ||
+      body.allow_invalid_cert !== undefined ||
+      body.username !== undefined ||
+      body.password !== undefined;
+
+    let existingPassword: string | undefined;
+    let dek: Buffer | undefined;
+    if (connectionChanged || body.password !== undefined) {
+      dek = await loadDekById(c.secretDekId!, a.tenantId);
+      existingPassword = decryptSecret(c.secretCiphertext, c.secretIv, dek, c.id);
+    }
+
+    const password = body.password ?? existingPassword;
+    if (connectionChanged && password) {
+      const test = await testImapConnection(effectiveCfg, password);
+      if (!test.ok) return reply.code(422).send({ error: test.message, code: "validation_failed" });
+    }
+
+    const updates: Partial<typeof schema.connections.$inferInsert> = { updatedAt: new Date() };
+    if (body.label !== undefined) updates.label = body.label ? body.label : null;
+    if (body.host !== undefined) updates.host = body.host;
+    if (body.port !== undefined) updates.port = body.port;
+    if (body.tls_mode !== undefined) updates.tlsMode = body.tls_mode;
+    if (body.allow_invalid_cert !== undefined) updates.allowInvalidCert = body.allow_invalid_cert;
+    if (body.username !== undefined) updates.username = body.username;
+    if (body.source_account !== undefined) updates.sourceAccount = body.source_account;
+    if (body.provider !== undefined) updates.provider = body.provider;
+    if (connectionChanged) {
+      updates.status = "active";
+      updates.lastError = null;
+      updates.lastValidatedAt = new Date();
+    }
+    if (body.password !== undefined && dek) {
+      const { iv, blob } = encryptSecret(body.password, dek, c.id);
+      updates.secretCiphertext = blob;
+      updates.secretIv = iv;
+    }
+
+    const [row] = await db
+      .update(schema.connections)
+      .set(updates)
+      .where(and(eq(schema.connections.id, id), eq(schema.connections.tenantId, a.tenantId)))
+      .returning();
+    return publicConnection(row!);
+  });
+
   app.delete("/v1/connections/:id", async (req, reply) => {
     const a = ctx(req);
     requireScope(req, "connections:write");
@@ -134,8 +361,6 @@ export async function registerRoutes(app: FastifyInstance) {
       .where(eq(schema.connections.id, c.id));
     return test;
   });
-
-  // TODO: PATCH /v1/connections/:id — update settings; re-validate when host/creds/tls change.
 
   // ---------- Data plane (live fetch) ----------
   app.get("/v1/messages", async (req) => {

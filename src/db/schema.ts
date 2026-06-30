@@ -55,6 +55,8 @@ export const connections = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     tenantId: uuid("tenant_id").references(() => tenants.id, { onDelete: "cascade" }).notNull(),
+    // Optional human nickname only. The admin UI treats username/email as the
+    // account identity; label is just a friendly disambiguator like "old host".
     label: text("label"),
     protocol: text("protocol", { enum: ["imap"] }).notNull().default("imap"), // pop3 later
     host: text("host").notNull(),
@@ -65,7 +67,13 @@ export const connections = pgTable(
     secretCiphertext: bytea("secret_ciphertext").notNull(),
     secretIv: bytea("secret_iv").notNull(),
     secretDekId: uuid("secret_dek_id").references(() => tenantKeys.id),
+    // Provider is an API tag returned on messages, not authentication data.
+    // "imap_generic" means "plain IMAP; no branded provider normalization known".
+    // The admin UI labels this optional metadata as "Host name" to avoid exposing
+    // internal provider-tag language.
     provider: text("provider").notNull().default("imap_generic"),
+    // Stable account identity returned on message JSON. For v1 this should normally
+    // mirror username/email; the dashboard does not expose it as a separate field.
     sourceAccount: text("source_account").notNull(),
     status: text("status", { enum: ["pending", "active", "error", "paused"] }).notNull().default("pending"),
     lastError: text("last_error"),
