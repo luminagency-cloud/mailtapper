@@ -1,18 +1,19 @@
 {
   "name": "mailtapper",
-  "version": "0.1.0",
+  "version": "0.1.8",
   "private": true,
   "description": "An access layer for email — connect any IMAP mailbox and read it as clean, unified JSON.",
   "type": "module",
   "engines": { "node": ">=20" },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push",
-    "seed": "tsx src/scripts/seed.ts",
+    "dev":         "doppler run -p mailtapper -c dev -- tsx watch src/index.ts",
+    "build":      "tsc -p tsconfig.json",
+    "start":      "node dist/index.js",
+    "db:generate": "doppler run -p mailtapper -c dev -- drizzle-kit generate",
+    "db:migrate":  "doppler run -p mailtapper -c dev -- drizzle-kit migrate",
+    "db:push":     "doppler run -p mailtapper -c dev -- drizzle-kit push",
+    "seed":        "doppler run -p mailtapper -c dev -- tsx src/scripts/seed.ts",
+    "issue-key":   "doppler run -p mailtapper -c dev -- tsx src/scripts/issue-key.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

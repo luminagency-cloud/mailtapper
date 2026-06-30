@@ -8,8 +8,8 @@ const schema = z.object({
     .string()
     .refine((v) => Buffer.from(v, "base64").length === 32, "MAILTAPPER_KEK_B64 must be 32 random bytes, base64-encoded (openssl rand -base64 32)"),
   MAILTAPPER_LOCATOR_SECRET: z.string().min(16),
-  PORT: z.coerce.number().default(3000),
-  PUBLIC_BASE_URL: z.string().url().default("http://localhost:3000"),
+  PORT: z.coerce.number().default(4321),
+  PUBLIC_BASE_URL: z.string().url(),
   LOG_LEVEL: z.string().default("info"),
   CACHE_TTL_SECONDS: z.coerce.number().default(60),
   DEFAULT_TIER: z.enum(["free", "pro", "scale"]).default("pro"),
