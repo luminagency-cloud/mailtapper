@@ -9,7 +9,10 @@ import { env } from "../env.js";
 import { TtlCache } from "../cache/lru.js";
 import { generateApiKey } from "../crypto/apikeys.js";
 import { testImapConnection } from "../imap/validator.js";
-import { getOrCreateTenantDek, loadDekById, encryptSecret, decryptSecret } from "../crypto/envelope.js";
+import { testSmtpConnection, type SmtpCfg } from "../smtp/validator.js";
+import {
+  getOrCreateTenantDek, loadDekById, encryptSecret, decryptSecret, encryptSmtpSecret, decryptSmtpSecret,
+} from "../crypto/envelope.js";
 import { searchAndFetch, fetchOne, type FetchTarget } from "../imap/fetch.js";
 import { decodeLocator } from "../imap/locator.js";
 import { decodeCursor, encodeCursor } from "./cursor.js";
@@ -28,7 +31,33 @@ function publicConnection(c: Connection) {
     tls_mode: c.tlsMode, allow_invalid_cert: c.allowInvalidCert, username: c.username,
     source_account: c.sourceAccount, status: c.status, last_error: c.lastError,
     last_validated_at: c.lastValidatedAt, created_at: c.createdAt,
+    // null smtp_* means "not set": host/port/tls fall back to the SMTP_DEFAULT_* env values,
+    // username/password fall back to the IMAP login.
+    send_enabled: c.sendEnabled, from_name: c.fromName,
+    smtp_host: c.smtpHost, smtp_port: c.smtpPort, smtp_tls_mode: c.smtpTlsMode,
+    smtp_username: c.smtpUsername, smtp_password_set: c.smtpSecretCiphertext !== null,
+    smtp_last_error: c.smtpLastError, smtp_last_validated_at: c.smtpLastValidatedAt,
   };
+}
+
+type SmtpFields = Pick<Connection, "smtpHost" | "smtpPort" | "smtpTlsMode" | "smtpUsername" | "username" | "allowInvalidCert">;
+
+/** Effective SMTP settings: the connection's own values, else the env defaults / IMAP login. */
+function resolveSmtpCfg(c: SmtpFields): SmtpCfg {
+  return {
+    host: c.smtpHost ?? env.SMTP_DEFAULT_HOST,
+    port: c.smtpPort ?? env.SMTP_DEFAULT_PORT,
+    tlsMode: c.smtpTlsMode ?? env.SMTP_DEFAULT_TLS_MODE,
+    allowInvalidCert: c.allowInvalidCert,
+    username: c.smtpUsername ?? c.username,
+  };
+}
+
+/** The SMTP password: its own secret if one is stored, else the IMAP password. */
+function smtpPasswordFor(c: Connection, dek: Buffer): string {
+  return c.smtpSecretCiphertext && c.smtpSecretIv
+    ? decryptSmtpSecret(c.smtpSecretCiphertext, c.smtpSecretIv, dek, c.id)
+    : decryptSecret(c.secretCiphertext, c.secretIv, dek, c.id);
 }
 
 function maxDate(a: Date | null, b: Date | null): Date | null {
@@ -47,6 +76,9 @@ async function buildTarget(c: Connection, tenantId: string): Promise<FetchTarget
   };
 }
 
+/** Header-safe single line (From display name, usernames). */
+const oneLine = z.string().regex(/^[^\r\n]*$/, "Must be a single line");
+
 const createBody = z.object({
   label: z.string().optional(),
   host: z.string().min(1),
@@ -59,6 +91,14 @@ const createBody = z.object({
   // API/provider tag. Defaults to imap_generic ("plain IMAP, no branded provider").
   // The admin UI exposes this, if at all, as optional "Host name" metadata.
   provider: z.string().default("imap_generic"),
+  send_enabled: z.boolean().default(false),
+  from_name: oneLine.max(200).optional(),
+  // Omitted with send_enabled -> SMTP_DEFAULT_* host/port/tls; username/password -> the IMAP login.
+  smtp_host: z.string().min(1).optional(),
+  smtp_port: z.number().int().positive().optional(),
+  smtp_tls_mode: z.enum(["ssl", "starttls", "none"]).optional(),
+  smtp_username: oneLine.min(1).optional(),
+  smtp_password: z.string().min(1).optional(),
 });
 
 const updateBody = z.object({
@@ -71,6 +111,14 @@ const updateBody = z.object({
   password: z.string().min(1).optional(),
   source_account: z.string().min(1).optional(),
   provider: z.string().min(1).optional(),
+  send_enabled: z.boolean().optional(),
+  from_name: oneLine.max(200).nullable().optional(),
+  smtp_host: z.string().min(1).optional(),
+  smtp_port: z.number().int().positive().optional(),
+  smtp_tls_mode: z.enum(["ssl", "starttls", "none"]).optional(),
+  // null clears the override and falls back to the IMAP login
+  smtp_username: oneLine.min(1).nullable().optional(),
+  smtp_password: z.string().min(1).nullable().optional(),
 });
 
 const userKeyScopes = ["connections:read", "connections:write", "messages:read"];
@@ -246,9 +294,25 @@ export async function registerRoutes(app: FastifyInstance) {
     const test = await testImapConnection(cfg, body.password);
     if (!test.ok) return reply.code(422).send({ error: test.message, code: "validation_failed" });
 
+    // Enabling send: pin the effective SMTP settings (defaults included) and prove the login works.
+    const smtpHost = body.smtp_host ?? (body.send_enabled ? env.SMTP_DEFAULT_HOST : null);
+    const smtpPort = body.smtp_port ?? (body.send_enabled ? env.SMTP_DEFAULT_PORT : null);
+    const smtpTlsMode = body.smtp_tls_mode ?? (body.send_enabled ? env.SMTP_DEFAULT_TLS_MODE : null);
+    let smtpValidatedAt: Date | null = null;
+    if (body.send_enabled) {
+      const smtpCfg = resolveSmtpCfg({
+        smtpHost, smtpPort, smtpTlsMode, smtpUsername: body.smtp_username ?? null,
+        username: body.username, allowInvalidCert: body.allow_invalid_cert,
+      });
+      const smtpTest = await testSmtpConnection(smtpCfg, body.smtp_password ?? body.password);
+      if (!smtpTest.ok) return reply.code(422).send({ error: smtpTest.message, code: "smtp_validation_failed" });
+      smtpValidatedAt = new Date();
+    }
+
     const id = randomUUID();
     const { dek, dekId } = await getOrCreateTenantDek(a.tenantId);
     const { iv, blob } = encryptSecret(body.password, dek, id);
+    const smtpSecret = body.smtp_password ? encryptSmtpSecret(body.smtp_password, dek, id) : null;
 
     const [row] = await db
       .insert(schema.connections)
@@ -258,6 +322,10 @@ export async function registerRoutes(app: FastifyInstance) {
         secretCiphertext: blob, secretIv: iv, secretDekId: dekId,
         provider: body.provider, sourceAccount: body.source_account ?? body.username,
         status: "active", lastValidatedAt: new Date(),
+        sendEnabled: body.send_enabled, fromName: body.from_name ?? null,
+        smtpHost, smtpPort, smtpTlsMode, smtpUsername: body.smtp_username ?? null,
+        smtpSecretCiphertext: smtpSecret?.blob ?? null, smtpSecretIv: smtpSecret?.iv ?? null,
+        smtpLastValidatedAt: smtpValidatedAt,
       })
       .returning();
     return reply.code(201).send(publicConnection(row!));
@@ -298,9 +366,33 @@ export async function registerRoutes(app: FastifyInstance) {
       body.username !== undefined ||
       body.password !== undefined;
 
+    // SMTP state after this update. Anything that changes the effective SMTP login (including the
+    // IMAP username/password it falls back to) re-verifies it when send is (or becomes) enabled.
+    const nextSendEnabled = body.send_enabled ?? c.sendEnabled;
+    const nextSmtp: SmtpFields = {
+      smtpHost: body.smtp_host ?? c.smtpHost ?? (nextSendEnabled ? env.SMTP_DEFAULT_HOST : null),
+      smtpPort: body.smtp_port ?? c.smtpPort ?? (nextSendEnabled ? env.SMTP_DEFAULT_PORT : null),
+      smtpTlsMode: body.smtp_tls_mode ?? c.smtpTlsMode ?? (nextSendEnabled ? env.SMTP_DEFAULT_TLS_MODE : null),
+      smtpUsername: body.smtp_username !== undefined ? body.smtp_username : c.smtpUsername,
+      username: effectiveCfg.username,
+      allowInvalidCert: effectiveCfg.allowInvalidCert,
+    };
+    const ownSmtpSecretAfter = body.smtp_password !== undefined ? body.smtp_password !== null : c.smtpSecretCiphertext !== null;
+    const smtpChanged =
+      (body.send_enabled === true && !c.sendEnabled) ||
+      body.smtp_host !== undefined ||
+      body.smtp_port !== undefined ||
+      body.smtp_tls_mode !== undefined ||
+      body.smtp_username !== undefined ||
+      body.smtp_password !== undefined ||
+      body.allow_invalid_cert !== undefined ||
+      (body.username !== undefined && nextSmtp.smtpUsername === null) ||
+      (body.password !== undefined && !ownSmtpSecretAfter);
+    const testSmtp = nextSendEnabled && smtpChanged;
+
     let existingPassword: string | undefined;
     let dek: Buffer | undefined;
-    if (connectionChanged || body.password !== undefined) {
+    if (connectionChanged || body.password !== undefined || testSmtp || body.smtp_password) {
       dek = await loadDekById(c.secretDekId!, a.tenantId);
       existingPassword = decryptSecret(c.secretCiphertext, c.secretIv, dek, c.id);
     }
@@ -309,6 +401,14 @@ export async function registerRoutes(app: FastifyInstance) {
     if (connectionChanged && password) {
       const test = await testImapConnection(effectiveCfg, password);
       if (!test.ok) return reply.code(422).send({ error: test.message, code: "validation_failed" });
+    }
+
+    if (testSmtp) {
+      const smtpPassword =
+        body.smtp_password ??
+        (body.smtp_password === null || !c.smtpSecretCiphertext ? password! : smtpPasswordFor(c, dek!));
+      const smtpTest = await testSmtpConnection(resolveSmtpCfg(nextSmtp), smtpPassword);
+      if (!smtpTest.ok) return reply.code(422).send({ error: smtpTest.message, code: "smtp_validation_failed" });
     }
 
     const updates: Partial<typeof schema.connections.$inferInsert> = { updatedAt: new Date() };
@@ -329,6 +429,24 @@ export async function registerRoutes(app: FastifyInstance) {
       const { iv, blob } = encryptSecret(body.password, dek, c.id);
       updates.secretCiphertext = blob;
       updates.secretIv = iv;
+    }
+    if (body.send_enabled !== undefined) updates.sendEnabled = body.send_enabled;
+    if (body.from_name !== undefined) updates.fromName = body.from_name;
+    if (nextSmtp.smtpHost !== c.smtpHost) updates.smtpHost = nextSmtp.smtpHost;
+    if (nextSmtp.smtpPort !== c.smtpPort) updates.smtpPort = nextSmtp.smtpPort;
+    if (nextSmtp.smtpTlsMode !== c.smtpTlsMode) updates.smtpTlsMode = nextSmtp.smtpTlsMode;
+    if (body.smtp_username !== undefined) updates.smtpUsername = body.smtp_username;
+    if (body.smtp_password === null) {
+      updates.smtpSecretCiphertext = null;
+      updates.smtpSecretIv = null;
+    } else if (body.smtp_password !== undefined && dek) {
+      const { iv, blob } = encryptSmtpSecret(body.smtp_password, dek, c.id);
+      updates.smtpSecretCiphertext = blob;
+      updates.smtpSecretIv = iv;
+    }
+    if (testSmtp) {
+      updates.smtpLastError = null;
+      updates.smtpLastValidatedAt = new Date();
     }
 
     const [row] = await db
@@ -360,6 +478,22 @@ export async function registerRoutes(app: FastifyInstance) {
       .set(test.ok ? { status: "active", lastError: null, lastValidatedAt: new Date() } : { status: "error", lastError: test.message })
       .where(eq(schema.connections.id, c.id));
     return test;
+  });
+
+  // SMTP login check (connect + AUTH, nothing sent). Uses the env defaults if the connection has
+  // no SMTP host yet, so it also answers "would sending work from this mailbox?".
+  app.post("/v1/connections/:id/test-smtp", async (req) => {
+    const a = ctx(req);
+    requireScope(req, "connections:read");
+    const c = await loadConnection((req.params as { id: string }).id, a.tenantId);
+    const dek = await loadDekById(c.secretDekId!, a.tenantId);
+    const cfg = resolveSmtpCfg(c);
+    const test = await testSmtpConnection(cfg, smtpPasswordFor(c, dek));
+    await db
+      .update(schema.connections)
+      .set(test.ok ? { smtpLastError: null, smtpLastValidatedAt: new Date() } : { smtpLastError: test.message })
+      .where(eq(schema.connections.id, c.id));
+    return { ...test, smtp: { host: cfg.host, port: cfg.port, tls_mode: cfg.tlsMode, username: cfg.username } };
   });
 
   // ---------- Data plane (live fetch) ----------

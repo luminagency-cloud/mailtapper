@@ -13,6 +13,11 @@ const schema = z.object({
   LOG_LEVEL: z.string().default("info"),
   CACHE_TTL_SECONDS: z.coerce.number().default(60),
   DEFAULT_TIER: z.enum(["free", "pro", "scale"]).default("pro"),
+  // SMTP defaults applied when a connection enables sending without its own SMTP host.
+  // Defaults are StackMail (20i / StackDNS): smtp.stackmail.com:587, STARTTLS, full email as login.
+  SMTP_DEFAULT_HOST: z.string().default("smtp.stackmail.com"),
+  SMTP_DEFAULT_PORT: z.coerce.number().default(587),
+  SMTP_DEFAULT_TLS_MODE: z.enum(["ssl", "starttls", "none"]).default("starttls"),
 });
 
 export const env = schema.parse(process.env);

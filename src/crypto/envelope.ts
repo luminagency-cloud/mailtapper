@@ -50,6 +50,15 @@ export function decryptSecret(blob: Buffer, iv: Buffer, dek: Buffer, connectionI
   return gcmDecrypt(dek, iv, blob, `conn:${connectionId}`).toString("utf8");
 }
 
+/** Same as encryptSecret, but AAD-bound to the SMTP slot so the two secrets can't be swapped. */
+export function encryptSmtpSecret(plaintext: string, dek: Buffer, connectionId: string) {
+  return gcmEncrypt(dek, Buffer.from(plaintext, "utf8"), `conn-smtp:${connectionId}`);
+}
+
+export function decryptSmtpSecret(blob: Buffer, iv: Buffer, dek: Buffer, connectionId: string): string {
+  return gcmDecrypt(dek, iv, blob, `conn-smtp:${connectionId}`).toString("utf8");
+}
+
 /** Get the tenant's current (non-retired) DEK, creating one on first use. Returns { dek, dekId }. */
 export async function getOrCreateTenantDek(tenantId: string): Promise<{ dek: Buffer; dekId: string }> {
   const existing = await db.query.tenantKeys.findFirst({

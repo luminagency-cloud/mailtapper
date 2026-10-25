@@ -120,6 +120,32 @@ docker compose up -d --build      # api + caddy; point the Caddyfile at your dom
 
 ---
 
+## E. Sending settings (SMTP) — v1 step 1
+
+Each connection can carry SMTP settings. This step only stores and verifies them; there is no send endpoint yet.
+
+```bash
+npm run db:push    # adds the smtp_* / send_enabled / from_name columns (all nullable or default false)
+```
+
+Enable sending on an existing connection. Omitted SMTP host/port/TLS fall back to `SMTP_DEFAULT_*`
+(StackMail: `smtp.stackmail.com:587`, STARTTLS); omitted SMTP username/password fall back to the IMAP login.
+mailtapper logs in to SMTP (no message sent) before saving and returns 422 `smtp_validation_failed` if it can't.
+
+```bash
+curl -sS -X PATCH localhost:3000/v1/connections/<CONNECTION_UUID> \
+  -H "authorization: Bearer $KEY" -H "content-type: application/json" \
+  -d '{"send_enabled":true,"from_name":"Newport Chess Club"}'
+#   → {..., "send_enabled":true, "smtp_host":"smtp.stackmail.com", "smtp_port":587, "smtp_tls_mode":"starttls", ...}
+
+# Re-check the SMTP login any time (nothing is sent):
+curl -sS -X POST localhost:3000/v1/connections/<CONNECTION_UUID>/test-smtp -H "authorization: Bearer $KEY"
+#   → {"ok":true,"message":"SMTP login succeeded.","smtp":{"host":"smtp.stackmail.com","port":587,...}}
+```
+
+Separate SMTP login: pass `smtp_username` / `smtp_password` (send `null` to fall back to the IMAP login again).
+The dashboard's mailbox form has the same fields under "Sending (SMTP)", plus a "test SMTP" button per row.
+
 ## Gotchas recap
 
 - `.env` auto-loads via dotenv — no shell sourcing needed.

@@ -75,6 +75,19 @@ export const connections = pgTable(
     // Stable account identity returned on message JSON. For v1 this should normally
     // mirror username/email; the dashboard does not expose it as a separate field.
     sourceAccount: text("source_account").notNull(),
+    // Outbound SMTP. All nullable so existing (read-only) connections keep working.
+    // smtp_username / smtp_secret fall back to the IMAP login when null, which is the
+    // normal case on StackMail (one login for IMAP and SMTP).
+    smtpHost: text("smtp_host"),
+    smtpPort: integer("smtp_port"),
+    smtpTlsMode: text("smtp_tls_mode", { enum: ["ssl", "starttls", "none"] }),
+    smtpUsername: text("smtp_username"),
+    smtpSecretCiphertext: bytea("smtp_secret_ciphertext"),
+    smtpSecretIv: bytea("smtp_secret_iv"),
+    fromName: text("from_name"),
+    sendEnabled: boolean("send_enabled").notNull().default(false),
+    smtpLastError: text("smtp_last_error"),
+    smtpLastValidatedAt: timestamp("smtp_last_validated_at", { withTimezone: true }),
     status: text("status", { enum: ["pending", "active", "error", "paused"] }).notNull().default("pending"),
     lastError: text("last_error"),
     lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),

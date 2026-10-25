@@ -7,7 +7,10 @@
  * NOTE: serving "/" is unauthenticated (the shell only). For anything beyond a
  * single-operator self-host, put it behind Caddy basic-auth / an IP allowlist / a VPN.
  * The inner JS uses string concatenation (no backticks or template interpolation) so it embeds cleanly.
+ * The only server-side interpolation is the SMTP defaults, shown as placeholders.
  */
+import { env } from "../env.js";
+
 export const dashboardHtml = `<!doctype html>
 <html lang="en">
 <head>
@@ -163,6 +166,23 @@ export const dashboardHtml = `<!doctype html>
         <label>Label <input name="label" placeholder="Work, Support, Billing" /></label>
         <label>Host name (optional) <input name="provider" placeholder="imap_generic" /></label>
       </details>
+      <label class="check"><input name="send_enabled" type="checkbox" /> Enable sending (SMTP login is checked before saving)</label>
+      <details class="advanced" id="smtpDetails">
+        <summary>Sending (SMTP)</summary>
+        <label>From name <input name="from_name" placeholder="Newport Chess Club" /></label>
+        <label>SMTP host <input name="smtp_host" placeholder="${env.SMTP_DEFAULT_HOST} (default)" /></label>
+        <label>SMTP port <input name="smtp_port" type="number" placeholder="${env.SMTP_DEFAULT_PORT} (default)" /></label>
+        <label>SMTP TLS mode
+          <select name="smtp_tls_mode">
+            <option value="">default (${env.SMTP_DEFAULT_TLS_MODE})</option>
+            <option value="ssl">ssl (implicit, 465)</option>
+            <option value="starttls">starttls (587)</option>
+            <option value="none">none</option>
+          </select>
+        </label>
+        <label>SMTP username <input name="smtp_username" placeholder="same as IMAP" /></label>
+        <label>SMTP password <input name="smtp_password" type="password" placeholder="same as IMAP" /></label>
+      </details>
       <div class="form-actions">
         <button id="saveMailbox" type="submit">Validate &amp; add</button>
         <button id="cancelEdit" class="ghost hidden" type="button">cancel edit</button>
@@ -288,10 +308,12 @@ export const dashboardHtml = `<!doctype html>
     $("#cancelEdit").classList.add("hidden");
     f.reset();
     f.querySelector(".advanced").open = false;
+    $("#smtpDetails").open = false;
     f.port.value = "993";
     f.provider.value = "";
     f.password.required = true;
     f.password.placeholder = "";
+    f.smtp_password.placeholder = "same as IMAP";
   }
 
   function editMailbox(id) {
@@ -313,6 +335,15 @@ export const dashboardHtml = `<!doctype html>
     f.password.placeholder = "leave blank to keep current password";
     f.provider.value = c.provider === "imap_generic" ? "" : c.provider || "";
     f.querySelector(".advanced").open = !!c.label;
+    f.send_enabled.checked = !!c.send_enabled;
+    f.from_name.value = c.from_name || "";
+    f.smtp_host.value = c.smtp_host || "";
+    f.smtp_port.value = c.smtp_port || "";
+    f.smtp_tls_mode.value = c.smtp_tls_mode || "";
+    f.smtp_username.value = c.smtp_username || "";
+    f.smtp_password.value = "";
+    f.smtp_password.placeholder = c.smtp_password_set ? "leave blank to keep current SMTP password" : "same as IMAP";
+    $("#smtpDetails").open = !!(c.send_enabled || c.smtp_host || c.smtp_username || c.from_name);
     $("#addMsg").textContent = "Editing " + (c.username || c.id);
     $("#addMsg").className = "msg";
     f.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -381,14 +412,19 @@ export const dashboardHtml = `<!doctype html>
         var when = c.last_validated_at ? new Date(c.last_validated_at).toLocaleString() : "never";
         var errLine = c.last_error ? "<div class='err small'>" + esc(c.last_error) + "</div>" : "";
         var labelLine = c.label ? "<span class='account-label'>" + esc(c.label) + "</span>" : "";
+        var sendLine = c.send_enabled
+          ? "<div class='small'><span class='pill'>send on</span></div>"
+          : "";
+        var smtpErrLine = c.smtp_last_error ? "<div class='err small'>SMTP: " + esc(c.smtp_last_error) + "</div>" : "";
         return "<tr>" +
           "<td>" + esc(c.username) + labelLine + "</td>" +
           "<td>" + esc(c.host) + ":" + esc(c.port) + "</td>" +
           "<td>" + esc(c.tls_mode) + "</td>" +
-          "<td>" + badge(c.status) + errLine + "</td>" +
+          "<td>" + badge(c.status) + errLine + sendLine + smtpErrLine + "</td>" +
           "<td class='muted small'>" + when + "</td>" +
           "<td class='actions'><div class='action-row'>" +
           "<button class='ghost' data-test='" + esc(c.id) + "'>test</button>" +
+          "<button class='ghost' data-test-smtp='" + esc(c.id) + "'>test SMTP</button>" +
           "<label class='pull-toggle'><input type='checkbox' data-pull='" + esc(c.id) + "' /> pull JSON</label>" +
           "<button class='ghost' data-edit='" + esc(c.id) + "'>edit</button>" +
           "<button class='ghost danger' data-del='" + esc(c.id) + "'>delete</button>" +
@@ -459,9 +495,18 @@ export const dashboardHtml = `<!doctype html>
       allow_invalid_cert: f.allow_invalid_cert.checked,
       username: f.username.value.trim(),
       source_account: f.username.value.trim(),
-      provider: f.provider.value.trim() || "imap_generic"
+      provider: f.provider.value.trim() || "imap_generic",
+      send_enabled: f.send_enabled.checked
     };
     if (!editingMailboxId || f.password.value) payload.password = f.password.value;
+    // Blank SMTP host/port/TLS = keep current (or the defaults); blank username/from name = clear on edit.
+    if (f.smtp_host.value.trim()) payload.smtp_host = f.smtp_host.value.trim();
+    if (f.smtp_port.value) payload.smtp_port = Number(f.smtp_port.value);
+    if (f.smtp_tls_mode.value) payload.smtp_tls_mode = f.smtp_tls_mode.value;
+    var smtpUser = f.smtp_username.value.trim(), fromName = f.from_name.value.trim();
+    if (smtpUser) payload.smtp_username = smtpUser; else if (editingMailboxId) payload.smtp_username = null;
+    if (fromName) payload.from_name = fromName; else if (editingMailboxId) payload.from_name = null;
+    if (f.smtp_password.value) payload.smtp_password = f.smtp_password.value;
     msg.textContent = editingMailboxId ? "Validating update..." : "Validating...";
     msg.className = "msg";
     try {
@@ -480,9 +525,24 @@ export const dashboardHtml = `<!doctype html>
     var btn = ev.target.closest("button"); if (!btn) return;
     var testId = btn.getAttribute("data-test"), delId = btn.getAttribute("data-del");
     var editId = btn.getAttribute("data-edit"), closeId = btn.getAttribute("data-close-result");
+    var smtpTestId = btn.getAttribute("data-test-smtp");
     try {
       if (closeId) { clearMailboxResult(closeId); return; }
       if (editId) { editMailbox(editId); return; }
+      if (smtpTestId) {
+        btn.textContent = "...";
+        btn.disabled = true;
+        setMailboxResult(smtpTestId, "Testing SMTP login...", { pending: true });
+        var smtpResult = await apiResult("/v1/connections/" + smtpTestId + "/test-smtp", { method: "POST" });
+        setMailboxResult(smtpTestId, "SMTP test result (nothing sent)", {
+          request: "POST /v1/connections/" + smtpTestId + "/test-smtp",
+          status: smtpResult.status,
+          http_ok: smtpResult.http_ok,
+          body: smtpResult.data
+        });
+        loadConns();
+        return;
+      }
       if (testId) {
         btn.textContent = "...";
         btn.disabled = true;
@@ -520,6 +580,7 @@ export const dashboardHtml = `<!doctype html>
       alert(e.message);
     } finally {
       if (testId) { btn.disabled = false; btn.textContent = "test"; }
+      if (smtpTestId) { btn.disabled = false; btn.textContent = "test SMTP"; }
     }
   });
 

@@ -1,6 +1,6 @@
 {
   "name": "mailtapper",
-  "version": "0.2.8",
+  "version": "0.3.0",
   "private": true,
   "description": "An access layer for email — connect any IMAP mailbox and read it as clean, unified JSON.",
   "type": "module",
@@ -24,6 +24,7 @@
     "html-to-text": "^9.0.5",
     "imapflow": "^1.0.164",
     "mailparser": "^3.7.1",
+    "nodemailer": "^8.0.11",
     "pg": "^8.12.0",
     "zod": "^3.23.8"
   },
@@ -31,6 +32,7 @@
     "@types/html-to-text": "^9.0.4",
     "@types/mailparser": "^3.4.5",
     "@types/node": "^20.14.0",
+    "@types/nodemailer": "^7.0.12",
     "@types/pg": "^8.11.6",
     "drizzle-kit": "^0.24.0",
     "tsx": "^4.16.0",
