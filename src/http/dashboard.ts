@@ -166,7 +166,7 @@ export const dashboardHtml = `<!doctype html>
         <label>Label <input name="label" placeholder="Work, Support, Billing" /></label>
         <label>Host name (optional) <input name="provider" placeholder="imap_generic" /></label>
       </details>
-      <label class="check"><input name="send_enabled" type="checkbox" /> Enable sending (SMTP login is checked before saving)</label>
+      <label class="check"><input name="send_enabled" type="checkbox" /> Enable sending (SMTP login is checked before saving; POST /v1/connections/:id/send)</label>
       <details class="advanced" id="smtpDetails">
         <summary>Sending (SMTP)</summary>
         <label>From name <input name="from_name" placeholder="Newport Chess Club" /></label>

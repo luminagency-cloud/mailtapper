@@ -25,7 +25,7 @@ export function buildTransport(cfg: SmtpCfg, password: string) {
   });
 }
 
-function formatSmtpError(error: unknown): string {
+export function formatSmtpError(error: unknown): string {
   const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
   if (/econnrefused/.test(msg)) return "Connection refused — is the SMTP port right? (465 = ssl, 587 = starttls)";
   return formatMailError(error);

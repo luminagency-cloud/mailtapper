@@ -2,6 +2,15 @@ import type { ImapFlow, SearchObject } from "imapflow";
 import { buildClient, formatMailError, type ConnCfg } from "./validator.js";
 import { normalizeMessage, type UnifiedMessage } from "./normalize.js";
 import { withRetry, upstream, gone } from "../util.js";
+import {
+  asFlagMailbox,
+  asSentMailbox,
+  saveSentWithClient,
+  setSeenWithClient,
+  type FlagWriteResult,
+  type SeenItem,
+  type SentSaveResult,
+} from "./flags.js";
 
 export interface FetchTarget extends ConnCfg {
   connectionId: string;
@@ -37,7 +46,7 @@ async function withHostSlot<T>(host: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
-async function withClient<T>(t: FetchTarget, fn: (c: ImapFlow) => Promise<T>): Promise<T> {
+async function withClient<T>(t: FetchTarget, fn: (c: ImapFlow) => Promise<T>, opts?: { tries?: number }): Promise<T> {
   return withHostSlot(t.host, () =>
     withRetry(async () => {
       const client = buildClient(t, t.password);
@@ -54,7 +63,7 @@ async function withClient<T>(t: FetchTarget, fn: (c: ImapFlow) => Promise<T>): P
           /* ignore */
         }
       }
-    }),
+    }, { tries: opts?.tries ?? 3 }),
   );
 }
 
@@ -120,6 +129,19 @@ export async function searchAndFetch(
       lock.release();
     }
   });
+}
+
+/** Write the IMAP `\Seen` flag (the same flag `is_unread` is derived from). Idempotent, so retries are safe. */
+export async function setSeen(t: FetchTarget, items: SeenItem[], seen: boolean): Promise<FlagWriteResult> {
+  return withClient(t, (client) => setSeenWithClient(asFlagMailbox(client), items, seen));
+}
+
+/**
+ * File the sent RFC822 bytes in the Sent folder. A single attempt: retrying an append
+ * the server stored but we failed to observe would save a second copy.
+ */
+export async function appendToSent(t: FetchTarget, raw: Buffer): Promise<SentSaveResult> {
+  return withClient(t, (client) => saveSentWithClient(asSentMailbox(client), raw), { tries: 1 });
 }
 
 /** Re-fetch a single message by its locator (folder, uid, uidvalidity). */

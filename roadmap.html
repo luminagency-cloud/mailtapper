@@ -63,14 +63,16 @@
     <h2><span class="num">1</span>v1 — Committed scope</h2>
     <p><strong>Identity:</strong> an access layer / fetch service. Not a mail client, not a store. The mailbox is the source of truth; the caller owns durable data.</p>
     <ul>
-      <li><strong>IMAP only, read-only.</strong></li>
+      <li><strong>IMAP</strong> for read and for mark-read write-back. <strong>SMTP</strong> for send, using each mailbox's saved settings (host/port/TLS default from env; username and password from the encrypted connection).</li>
+      <li><strong>Send:</strong> <code>POST /v1/connections/:id/send</code> (to/cc/bcc, text and/or html, reply headers). Returns the SMTP message id. A copy is appended to the Sent folder when the server has one.</li>
+      <li><strong>Mark read / unread:</strong> <code>POST /v1/messages/read</code> writes the IMAP <code>\Seen</code> flag for one or more message ids — the same flag the read path uses for <code>is_unread</code>.</li>
       <li><strong>Model: access layer + thin cache</strong> — live fetch on demand; connection hygiene (per-host connection reuse, concurrency cap, retry + backoff); short-TTL cache. <strong>No long-term mail storage.</strong></li>
       <li><strong>Control plane:</strong> register/manage connections — host, port, <strong>explicit TLS mode</strong> (ssl / starttls / none), allow-invalid-cert, username, password. Validated before save, encrypted at rest.</li>
       <li><strong>Data plane:</strong> query normalized mail by account, sender, time window, unread, full-text → one <strong>unified JSON</strong> shape.</li>
       <li><strong>Unified message:</strong> content-hash <code>internal_id</code> (caller dedupe) + opaque <code>id</code> locator (live single-message re-fetch), <code>provider</code> tag, <code>has_attachments</code> + metadata, clean <strong>HTML-stripped</strong> <code>body_text</code>.</li>
       <li><strong>Security:</strong> per-tenant API keys (hashed, scoped); envelope encryption (KEK→DEK, AAD, key-version rotation path).</li>
       <li><strong>Scope:</strong> INBOX first.</li>
-      <li><strong>Stack:</strong> Node/TS · Fastify · ImapFlow · Postgres (Neon now) · Docker + Caddy.</li>
+      <li><strong>Stack:</strong> Node/TS · Fastify · ImapFlow · Nodemailer · Postgres (Neon now) · Docker + Caddy.</li>
       <li><strong>Human surface:</strong> API-first, plus a thin connection-manager view.</li>
     </ul>
   </section>

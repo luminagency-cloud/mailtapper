@@ -49,7 +49,7 @@
 <li><strong>Built to hold credentials safely:</strong> explicit per-connection TLS, envelope-encrypted secrets.</li>
 </ul>
 <p><strong>Stack:</strong> Node 20 + TypeScript, Fastify, ImapFlow, mailparser + html-to-text, Postgres (Neon now; vanilla SQL so it ports to a local container), Docker + Caddy on the Ubuntu host.</p>
-<p><strong>Not in v1:</strong> push/webhooks, POP3, multi-folder, attachment bytes, sending, OAuth providers (Gmail/M365), self-host, metered billing — tracked in Linear (team LA, project Mailtapper).</p>
+<p><strong>Not in v1:</strong> push/webhooks, POP3, multi-folder, attachment bytes, OAuth providers (Gmail/M365), self-host, metered billing — tracked in Linear (team LA, project Mailtapper). Sending and mark-read write-back are in v1.</p>
 <h2>Architecture</h2>
 <pre><code>                          rate-limit / authz / clamp to tier caps
 caller (AI / automation) --&gt;
@@ -154,6 +154,8 @@ CREATE TABLE connections (
 <tr><td>PATCH</td><td>/v1/connections/:id</td><td>Update (re-validates if host/creds/tls change).</td></tr>
 <tr><td>DELETE</td><td>/v1/connections/:id</td><td>Remove (wipes the stored secret).</td></tr>
 <tr><td>POST</td><td>/v1/connections/:id/test</td><td>Re-run the connectivity diagnostic.</td></tr>
+<tr><td>POST</td><td>/v1/connections/:id/test-smtp</td><td>SMTP login check. Sends nothing.</td></tr>
+<tr><td>POST</td><td>/v1/connections/:id/send</td><td>Send as this mailbox. Scope <code>messages:send</code>. Requires <code>send_enabled</code>.</td></tr>
 </table>
 <pre><code>POST /v1/connections
 { "label":"Work", "host":"mail.host.com", "port":993,
@@ -175,6 +177,8 @@ CREATE TABLE connections (
 6. cache (short TTL); return { data: [...], next_cursor }</code></pre>
 <p><strong>Pagination:</strong> keyset by (received_at, uid); next_cursor encodes position. <strong>Cross-account</strong> queries fan out per connection and merge — the heaviest call, which is exactly what the concurrency + connection caps bound.</p>
 <p><strong><code>GET /v1/messages/{id}</code></strong> — decode locator -&gt; authorize against the caller's tenant -&gt; live FETCH that UID -&gt; normalize. Stale uidvalidity -&gt; 410.</p>
+<p><strong><code>POST /v1/connections/:id/send</code></strong> — scope <code>messages:send</code> (or <code>admin</code>). SMTP host/port/TLS come from the connection, else <code>SMTP_DEFAULT_HOST</code> / <code>SMTP_DEFAULT_PORT</code> / <code>SMTP_DEFAULT_TLS_MODE</code>. Username and password come from the connection's SMTP secret, else the IMAP login. Body: <code>to</code> (string or array; optional <code>{email,name}</code>), <code>cc</code>, <code>bcc</code>, <code>subject</code>, <code>text</code> and/or <code>html</code>, optional <code>reply_to</code>, <code>in_reply_to</code>, <code>references</code>. Returns <code>{ ok, connection_id, message_id, accepted, rejected, saved_to_sent, sent_folder, sent_error }</code>. Guards: authenticated only, recipient cap (50), 1 MiB combined body, CR/LF rejected in headers, send is not retried. The same RFC822 bytes are appended to the IMAP Sent folder (<code>\Sent</code>, else a common Sent name). Append failure does not undo the send.</p>
+<p><strong><code>POST /v1/messages/read</code></strong> — scope <code>messages:write</code> (or <code>admin</code>). Body <code>{ "ids": ["&lt;message id&gt;", ...], "read": true }</code>. <code>read</code> defaults to true; <code>false</code> clears <code>\Seen</code>. That is the flag <code>is_unread</code> is derived from. Up to 100 ids. Per-id failures (stale locator, missing message, paused connection) come back in <code>failed</code> and do not fail the whole batch. A successful write drops that tenant's message cache.</p>
 <p><strong>Search honesty (a real model trade-off):</strong> with no stored index, search is whatever IMAP SEARCH supports. since/until/from/unread/subject are reliable everywhere. Full-body text (q) maps to IMAP TEXT/BODY, which is server-dependent and can be slow — so v1 offers it best-effort and documents it may be unsupported on some hosts. Fast, rich cross-account full-text is the main capability we trade away by not storing; an opt-in stored-index tier could add it back later.</p>
 <h2>Limits &amp; Guardrails</h2>
 <p><strong>Principle: mailbox size is not your cost — query breadth is.</strong> Connecting a 30k-message mailbox costs ~nothing (we don't slurp it); cost is per-fetch compute/egress, only on what's fetched. So we bound fetches, not mailbox size. No LLM cost — the caller pays for its own AI.</p>
@@ -207,7 +211,7 @@ CREATE TABLE connections (
 <li><strong>Envelope encryption (KEK -&gt; DEK).</strong> Master KEK (32 random bytes) lives outside the DB — env MAILTAPPER_KEK_B64 now, KMS later; loaded as a versioned keyring. Per-tenant DEK (random 32 bytes) encrypts secrets and is stored wrapped by the KEK in tenant_keys.</li>
 <li><strong>Cipher:</strong> AES-256-GCM, random 12-byte IV, AAD = conn:&lt;connection_id&gt; so ciphertext can't be transplanted between rows/tenants.</li>
 <li><strong>Rotation:</strong> kek_version / dek_version columns + keyring let old and new coexist — rotate the KEK by re-wrapping DEKs; rotate a DEK by re-encrypting one tenant's secrets. No big-bang.</li>
-<li><strong>API keys:</strong> mtapper_live_&lt;32 random bytes&gt;; store sha256(key) + prefix; verify constant-time; scoped (messages:read for read-only callers like luminmail). Shown once.</li>
+<li><strong>API keys:</strong> mtapper_live_&lt;32 random bytes&gt;; store sha256(key) + prefix; verify constant-time; scoped (<code>messages:read</code> for read-only callers, <code>messages:send</code> to send, <code>messages:write</code> to mark read/unread, <code>admin</code> for all). Shown once. A read-only key cannot send.</li>
 <li><strong>Point-of-use only:</strong> secrets decrypted in-memory at fetch time, never logged or persisted; deleting a connection wipes its secret.</li>
 </ul>
 <h2>Connection Hygiene &amp; Cache</h2>
@@ -230,6 +234,9 @@ CREATE TABLE connections (
       MAILTAPPER_KEK_B64: ${MAILTAPPER_KEK_B64}      # 32 random bytes, base64 (openssl rand -base64 32)
       MAILTAPPER_LOCATOR_SECRET: ${LOCATOR_SECRET}   # HMAC key for the message id locator
       PUBLIC_BASE_URL: https://api.yourdomain.com
+      SMTP_DEFAULT_HOST: smtp.example.com          # fallback only; per-connection host wins
+      SMTP_DEFAULT_PORT: 587
+      SMTP_DEFAULT_TLS_MODE: starttls              # ssl | starttls | none
     expose: ["3000"]
   caddy:
     image: caddy:2
@@ -238,10 +245,10 @@ CREATE TABLE connections (
 volumes: { caddy_data: {} }</code></pre>
 <p>Migrations via Drizzle on deploy. Moving Neon -&gt; local Postgres later is a DATABASE_URL swap (vanilla SQL, no Neon-specific features).</p>
 <h2>Scope &amp; Deferred</h2>
-<p><strong>v1 (this spec):</strong> IMAP, read-only, pull-only live fetch + thin cache, INBOX, bounded/paginated queries with tier caps, per-tenant scoped API keys, envelope-encrypted credentials, connection-hygiene layer. DB = config + keys only.</p>
+<p><strong>v1 (this spec):</strong> IMAP read, SMTP send, IMAP <code>\Seen</code> write-back, pull-only live fetch + thin cache, INBOX, bounded/paginated queries with tier caps, per-tenant scoped API keys, envelope-encrypted credentials, connection-hygiene layer. DB = config + keys only (sent and read state stay on the mail server).</p>
 <p><strong>Decided: pull-only (no push) for v1.</strong> Callers poll the data plane on their own cadence; mailtapper holds no per-connection cursor and runs no background worker. Rationale: the ICP (polling agents/automations) doesn't need real-time delivery; push would reintroduce the worker + persistent cursor + delivery infra the access-layer model deliberately removed, and would invert the cost profile to continuous background IMAP polling. "Opt-in" would limit runtime load but not build scope. Deferring is free: push is purely additive (the read contract is unchanged).</p>
 <p><strong>Key trade-off accepted:</strong> no stored full-text index -&gt; search limited to IMAP SEARCH (reliable on headers/since/from/unread/subject; full-body best-effort).</p>
-<p><strong>Deferred (Linear, team LA, project Mailtapper):</strong> push/webhooks (v3 candidate, demand-gated), POP3, multi-folder, attachment bytes, Microsoft 365 &amp; Gmail (OAuth), sending, self-host, metered billing, optional stored-index/cache tier for rich search &amp; longer retention.</p>
+<p><strong>Deferred (Linear, team LA, project Mailtapper):</strong> push/webhooks (v3 candidate, demand-gated), POP3, multi-folder, attachment bytes, Microsoft 365 &amp; Gmail (OAuth), self-host, metered billing, optional stored-index/cache tier for rich search &amp; longer retention.</p>
 <p><strong>Open decisions</strong> (including the pricing model) are tracked in Linear, not in the roadmap.</p>
 
   <footer>mailtapper — generated spec snapshot. Keep in sync with the working copy on material changes.</footer>

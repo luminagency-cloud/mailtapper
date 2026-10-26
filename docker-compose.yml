@@ -11,6 +11,9 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
       CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-60}
       DEFAULT_TIER: ${DEFAULT_TIER:-pro}
+      SMTP_DEFAULT_HOST: ${SMTP_DEFAULT_HOST:-smtp.stackmail.com}
+      SMTP_DEFAULT_PORT: ${SMTP_DEFAULT_PORT:-587}
+      SMTP_DEFAULT_TLS_MODE: ${SMTP_DEFAULT_TLS_MODE:-starttls}
     expose:
       - "3000"
 
