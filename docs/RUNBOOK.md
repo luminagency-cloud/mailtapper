@@ -6,13 +6,13 @@ Two services on one machine: **mailtapper on `:3000`**, **luminmail on `:3001`**
 
 ## Prereqs
 
-Node 20+, a Postgres URL (your Neon string), your mailbox's IMAP credentials, plus `openssl` and `psql`.
+Node 20+, a Postgres URL for this machine (Neon is fine locally), your mailbox's IMAP credentials, plus `openssl` and `psql`. Production uses local Postgres 16 on the VM — see the README's [Hosting & deployment](../README.md#hosting--deployment).
 
 > **`.env` auto-loads.** mailtapper bundles `dotenv`, so a `.env` in the repo root is picked up automatically by the server, the seed script, and drizzle-kit — no shell sourcing. (In Docker, env comes from `environment:` and dotenv simply no-ops.)
 
 > **Heads-up — types.** `npm run dev` uses **tsx**, which transpiles without type-checking, so it **boots even if `npm run typecheck` still reports the minor ImapFlow type nits**. Run `npm run typecheck` separately to clean those up; it won't block booting.
 
-> mailtapper needs outbound IMAP (port 993) and, to send, outbound SMTP (587 or 465) to your mail host. Fine locally and on the Ubuntu box. The HTTPS caller does not.
+> mailtapper needs outbound IMAP (port 993) and, to send, outbound SMTP (587 or 465) to your mail host. Fine locally and on the Google Cloud VM. The HTTPS caller does not.
 
 ---
 
@@ -26,7 +26,7 @@ npm install
 cp .env.example .env
 echo "MAILTAPPER_KEK_B64=$(openssl rand -base64 32)"        # paste into .env
 echo "MAILTAPPER_LOCATOR_SECRET=$(openssl rand -base64 32)" # paste into .env
-# then edit .env: DATABASE_URL=<your Neon url>, PORT=3000
+# then edit .env: DATABASE_URL=<your Postgres url>, PORT=3000
 
 npm run db:push                   # create tables: connections, api_keys, tenants, tenant_keys
 npm run seed -- "personal"        # prints your API key ONCE — copy it
@@ -110,16 +110,13 @@ Open **localhost:3001**, view the inbox — now populated with mail pulled **thr
 
 ---
 
-## D. Production (Ubuntu box)
+## D. Production (Google Cloud VM)
 
-```bash
-# on the box, in mailtapper/ with .env filled:
-docker compose up -d --build      # api + caddy; point the Caddyfile at your domain
-# luminmail's MAILTAPPER_BASE_URL then becomes https://api.yourdomain.com
-# No new database columns for send/mark-read (smtp_* and send_enabled already exist).
-# The host must allow outbound SMTP (587/465). Set SMTP_DEFAULT_* in .env or per connection.
-# Keys need messages:send and messages:write, or admin.
-```
+Production runs on the always-free Google Cloud e2-micro VM `mailtapper` (project `lumin-all`, us-east1-b), with Docker Compose, a local Postgres and Caddy. Everything about it is in the README's **[Hosting & deployment](../README.md#hosting--deployment)** section: SSH, `.env`, redeploy, migrations, backups and domain. On the VM, `luminmail`'s `MAILTAPPER_BASE_URL` is `https://34-148-236-200.sslip.io`, or `https://mailtapper.luminagency.com` once DNS is added.
+
+- No new database columns for send/mark-read (smtp_* and send_enabled already exist).
+- The VM allows outbound SMTP 587 (Google blocks only 25). `SMTP_DEFAULT_*` in `.env` points at `smtp.luminagency.com:587` STARTTLS.
+- Keys need messages:send and messages:write, or admin.
 
 ---
 

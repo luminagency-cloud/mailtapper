@@ -72,7 +72,7 @@
       <li><strong>Unified message:</strong> content-hash <code>internal_id</code> (caller dedupe) + opaque <code>id</code> locator (live single-message re-fetch), <code>provider</code> tag, <code>has_attachments</code> + metadata, clean <strong>HTML-stripped</strong> <code>body_text</code>.</li>
       <li><strong>Security:</strong> per-tenant API keys (hashed, scoped); envelope encryption (KEK→DEK, AAD, key-version rotation path).</li>
       <li><strong>Scope:</strong> INBOX first.</li>
-      <li><strong>Stack:</strong> Node/TS · Fastify · ImapFlow · Nodemailer · Postgres (Neon now) · Docker + Caddy.</li>
+      <li><strong>Stack:</strong> Node/TS · Fastify · ImapFlow · Nodemailer · Postgres · Docker + Caddy. Production hosting is the Google Cloud VM; operational detail is only in the <a href="README.md#hosting--deployment">README</a>.</li>
       <li><strong>Human surface:</strong> API-first, plus a thin connection-manager view.</li>
     </ul>
   </section>
@@ -102,6 +102,7 @@
       <tr><td><strong>Name</strong></td><td><span class="ok">✓ Resolved</span> — mailtapper.</td></tr>
       <tr><td><strong>External validation (5-yes test)</strong></td><td>Deferred to <strong>v2</strong> — v1 is dogfood-for-self.</td></tr>
       <tr><td><strong>v1 audience / consumer</strong></td><td><span class="ok">✓ Resolved</span> — the founder only, dogfooded via luminmail (built testbed + first consumer). AI planner is a future consumer, not yet built.</td></tr>
+      <tr><td><strong>Hosting</strong></td><td><span class="ok">✓ Resolved</span> — always-free Google Cloud e2-micro (local Postgres 16, Caddy). The Oracle Cloud plan was dropped. How to reach it and update it is only in the README.</td></tr>
     </table>
   </section>
 

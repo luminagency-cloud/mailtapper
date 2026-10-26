@@ -9,6 +9,7 @@
 - **[Build spec](spec.html)** — the full v1 architecture, schema, and API surface.
 - **[Roadmap](roadmap.html)** — committed v1 scope and the decision record. Future work is tracked in Linear (team LA, project Mailtapper).
 - **[Runbook](docs/RUNBOOK.md)** — run it end-to-end and wire luminmail as the first client.
+- **[Hosting & deployment](#hosting--deployment)** — where production runs (Google Cloud e2-micro) and how to update it.
 
 ## What it is
 
@@ -56,6 +57,86 @@ Mailtapper holds mailbox **credentials**, not mailbox **contents**. Secrets are 
 ## Stack
 
 Node + TypeScript · Fastify · ImapFlow · Nodemailer · Postgres · Docker + Caddy.
+
+## Hosting & deployment
+
+**Where it runs:** Google Cloud, Google account **luminagency@gmail.com**, project **lumin-all**, VM **`mailtapper`** in zone **us-east1-b**. It's an **e2-micro** (2 shared vCPU, 1 GB RAM + 2 GB swapfile), Debian 12, 30 GB standard disk, on the **always-free tier**. Set up 2026-10-26. It replaced the Oracle Cloud plan, which was dropped as too fiddly. Render, Koyeb and similar hosts were skipped because free plans sleep or have a cold start.
+
+| | |
+|---|---|
+| Public URL | `https://34-148-236-200.sslip.io` (switch to `https://mailtapper.luminagency.com` once that DNS record exists, see below) |
+| Health check | `GET /healthz` → `{"ok":true,...}` |
+| External IP | `34.148.236.200` (internal `10.142.0.2`). Make it a **static** IP in VPC network → IP addresses, or it can change if the VM is stopped. |
+| Open ports | 80/443 only (GCP firewall `default-allow-http` / `default-allow-https`, plus SSH 22). Postgres and the API port 3000 are not published. |
+| Outbound | IMAP 993 and SMTP 587 to `*.luminagency.com` (StackMail) work. Google blocks outbound 25, so never use port 25. |
+
+**Free-tier note:** the free allowance is **one e2-micro per billing account**, not per project. Don't create a second free VM. Run other small apps on this VM as extra compose stacks behind the same Caddy, or add a site block to a shared Caddy. Billing is attached, so anything beyond the free limits (a bigger VM, a second VM, premium network egress over 1 GB/month) is charged. Setting a budget alert on the billing account is a good idea.
+
+### Layout on the VM
+
+```
+/home/grok/mailtapper/            # this repo (plain copy of main, no git creds on the VM)
+  .env                            # production secrets, chmod 600, NEVER committed
+  docker-compose.yml              # base: api + caddy
+  deploy/gcp/compose.gcp.yml      # VM overlay: local Postgres 16, memory caps, Caddy config
+  deploy/gcp/Caddyfile            # {$MAILTAPPER_DOMAIN} -> api:3000, automatic Let's Encrypt TLS
+  deploy/gcp/backup.sh            # nightly pg_dump
+/home/grok/mailtapper-backups/    # mailtapper-YYYY-MM-DD.sql.gz, kept 14 days
+```
+
+`.env` sets `COMPOSE_FILE=docker-compose.yml:deploy/gcp/compose.gcp.yml` and `COMPOSE_PROJECT_NAME=mailtapper`, so a plain `docker compose ...` in `~/mailtapper` uses the overlay. Services are `api` (Node, 384 MB cap), `db` (postgres:16-alpine, 256 MB cap, volume `mailtapper_pg_data`) and `caddy` (128 MB cap, certs in volume `mailtapper_caddy_data`). All are `restart: unless-stopped` and Docker is enabled at boot, so the stack comes back on reboot (tested). Unattended security upgrades are on.
+
+`.env` keys: `COMPOSE_FILE`, `COMPOSE_PROJECT_NAME`, `MAILTAPPER_DOMAIN`, `POSTGRES_PASSWORD`, `DATABASE_URL` (`postgres://mailtapper:…@db:5432/mailtapper?sslmode=disable`), `MAILTAPPER_KEK_B64`, `MAILTAPPER_LOCATOR_SECRET`, `PORT=3000`, `PUBLIC_BASE_URL`, `LOG_LEVEL`, `CACHE_TTL_SECONDS`, `DEFAULT_TIER`, `SMTP_DEFAULT_HOST=smtp.luminagency.com`, `SMTP_DEFAULT_PORT=587`, `SMTP_DEFAULT_TLS_MODE=starttls`. Secrets were generated on the VM with `openssl rand`.
+
+> **Back up `MAILTAPPER_KEK_B64`** (for example in a password manager). If it's lost, every stored mailbox password becomes unreadable, and the database backups can't be decrypted either.
+
+### SSH
+
+- Easiest: Google Cloud console → Compute Engine → VM instances → `mailtapper` → **SSH** button (browser SSH, no keys needed).
+- From a terminal: `ssh grok@34.148.236.200`, using a key listed in the VM's metadata (Edit → SSH keys). To add your own, paste your public key there.
+- Then run `cd ~/mailtapper`. The `grok` user is in the `docker` group.
+
+### Redeploy / update
+
+The VM has no GitHub credentials. Copy a fresh tree from a machine that can read the private repo:
+
+```bash
+# on a machine with repo access
+git clone --depth 1 https://github.com/luminagency-cloud/mailtapper /tmp/mt && cd /tmp/mt
+tar --exclude .git -czf /tmp/mt.tgz . && scp /tmp/mt.tgz grok@34.148.236.200:/tmp/
+# on the VM
+cd ~/mailtapper && tar -xzf /tmp/mt.tgz -C ~/mailtapper   # .env is not in the tarball, so it is kept
+docker compose up -d --build                              # ~5 min on the e2-micro
+```
+
+Another option is a read-only GitHub deploy key on the VM, then `git pull` there.
+
+**Schema changes (drizzle):** the runtime image has no dev deps, so use the build stage:
+
+```bash
+docker build --target build -t mailtapper-tools .
+docker run --rm --network mailtapper_default --env-file .env mailtapper-tools npx drizzle-kit push
+```
+
+The `npm run db:push / seed / issue-key` scripts wrap `doppler`, which isn't used on the VM. Call the tools directly as above, for example `... mailtapper-tools npx tsx src/scripts/issue-key.ts messages:read,messages:send,messages:write`.
+
+### Logs, backups, restore
+
+```bash
+docker compose ps
+docker compose logs -f api        # or caddy / db
+~/mailtapper/deploy/gcp/backup.sh # manual dump; cron runs it nightly at 03:15 VM time (UTC)
+gunzip -c ~/mailtapper-backups/mailtapper-YYYY-MM-DD.sql.gz | docker compose exec -T db psql -U mailtapper -d mailtapper   # restore
+```
+
+Backups stay on the VM's own disk. Copy them off now and then, together with the KEK, if the data matters.
+
+### Domain / TLS
+
+Caddy serves whatever `MAILTAPPER_DOMAIN` in `.env` lists and gets the certificates itself. The current value is `34-148-236-200.sslip.io`, a wildcard DNS name that needs no setup. To move to the real domain:
+
+1. In Cloudflare (zone `luminagency.com`), add `A mailtapper → 34.148.236.200` with **DNS only** (grey cloud). It must not be proxied, so Caddy can get a Let's Encrypt cert. It also overrides the proxied `*.luminagency.com` wildcard.
+2. On the VM, set `MAILTAPPER_DOMAIN="mailtapper.luminagency.com 34-148-236-200.sslip.io"` and `PUBLIC_BASE_URL=https://mailtapper.luminagency.com/`, then run `docker compose up -d`.
 
 ## Sending and mark-read
 

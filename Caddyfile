@@ -1,4 +1,6 @@
-# Replace with your real hostname. Caddy auto-provisions HTTPS.
+# Generic compose file. Production on the GCP VM uses deploy/gcp/Caddyfile
+# (see README "Hosting & deployment"). Replace the hostname below for any other host.
+# Caddy auto-provisions HTTPS.
 api.yourdomain.com {
 	reverse_proxy api:3000
 }

@@ -1,0 +1,56 @@
+# Google Cloud VM overlay (VM "mailtapper", project lumin-all).
+# Activated on the VM via COMPOSE_FILE=docker-compose.yml:deploy/gcp/compose.gcp.yml in .env,
+# so a plain `docker compose up -d --build` uses it. Adds a local Postgres and tight memory caps
+# for the 1 GB e2-micro, and points Caddy at deploy/gcp/Caddyfile.
+services:
+  api:
+    mem_limit: 384m
+    environment:
+      NODE_OPTIONS: --max-old-space-size=256
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 256m
+    shm_size: 64m
+    environment:
+      POSTGRES_DB: mailtapper
+      POSTGRES_USER: mailtapper
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=32MB
+      - -c
+      - work_mem=2MB
+      - -c
+      - maintenance_work_mem=16MB
+      - -c
+      - effective_cache_size=128MB
+      - -c
+      - max_connections=20
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mailtapper -d mailtapper"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # No ports: Postgres is only reachable on the internal compose network.
+
+  caddy:
+    mem_limit: 128m
+    environment:
+      MAILTAPPER_DOMAIN: ${MAILTAPPER_DOMAIN}
+    volumes:
+      - ./deploy/gcp/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pg_data: {}
+  caddy_config: {}
