@@ -7,7 +7,7 @@
 ## Docs
 
 - **[Build spec](spec.html)** — the full v1 architecture, schema, and API surface.
-- **[Roadmap](roadmap.html)** — committed v1 scope, what's deferred, and open decisions.
+- **[Roadmap](roadmap.html)** — committed v1 scope and the decision record. Future work is tracked in Linear (team LA, project Mailtapper).
 - **[Runbook](docs/RUNBOOK.md)** — run it end-to-end and wire luminmail as the first client.
 
 ## What it is

@@ -49,7 +49,7 @@
 <li><strong>Built to hold credentials safely:</strong> explicit per-connection TLS, envelope-encrypted secrets.</li>
 </ul>
 <p><strong>Stack:</strong> Node 20 + TypeScript, Fastify, ImapFlow, mailparser + html-to-text, Postgres (Neon now; vanilla SQL so it ports to a local container), Docker + Caddy on the Ubuntu host.</p>
-<p><strong>Not in v1:</strong> push/webhooks, POP3, multi-folder, attachment bytes, OAuth providers (Gmail/M365), self-host, metered billing — see the Roadmap. Sending and mark-read write-back are in v1.</p>
+<p><strong>Not in v1:</strong> push/webhooks, POP3, multi-folder, attachment bytes, OAuth providers (Gmail/M365), self-host, metered billing — tracked in Linear (team LA, project Mailtapper). Sending and mark-read write-back are in v1.</p>
 <h2>Architecture</h2>
 <pre><code>                          rate-limit / authz / clamp to tier caps
 caller (AI / automation) --&gt;
@@ -248,8 +248,8 @@ volumes: { caddy_data: {} }</code></pre>
 <p><strong>v1 (this spec):</strong> IMAP read, SMTP send, IMAP <code>\Seen</code> write-back, pull-only live fetch + thin cache, INBOX, bounded/paginated queries with tier caps, per-tenant scoped API keys, envelope-encrypted credentials, connection-hygiene layer. DB = config + keys only (sent and read state stay on the mail server).</p>
 <p><strong>Decided: pull-only (no push) for v1.</strong> Callers poll the data plane on their own cadence; mailtapper holds no per-connection cursor and runs no background worker. Rationale: the ICP (polling agents/automations) doesn't need real-time delivery; push would reintroduce the worker + persistent cursor + delivery infra the access-layer model deliberately removed, and would invert the cost profile to continuous background IMAP polling. "Opt-in" would limit runtime load but not build scope. Deferring is free: push is purely additive (the read contract is unchanged).</p>
 <p><strong>Key trade-off accepted:</strong> no stored full-text index -&gt; search limited to IMAP SEARCH (reliable on headers/since/from/unread/subject; full-body best-effort).</p>
-<p><strong>Deferred (Roadmap):</strong> push/webhooks (v3 candidate, demand-gated), POP3, multi-folder, attachment bytes, Microsoft 365 &amp; Gmail (OAuth), self-host, metered billing, optional stored-index/cache tier for rich search &amp; longer retention.</p>
-<p><strong>Open decisions still live:</strong> pricing model.</p>
+<p><strong>Deferred (Linear, team LA, project Mailtapper):</strong> push/webhooks (v3 candidate, demand-gated), POP3, multi-folder, attachment bytes, Microsoft 365 &amp; Gmail (OAuth), self-host, metered billing, optional stored-index/cache tier for rich search &amp; longer retention.</p>
+<p><strong>Open decisions</strong> (including the pricing model) are tracked in Linear, not in the roadmap.</p>
 
   <footer>mailtapper — generated spec snapshot. Keep in sync with the working copy on material changes.</footer>
 </div>
