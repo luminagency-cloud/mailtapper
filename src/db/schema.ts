@@ -30,6 +30,8 @@ export const apiKeys = pgTable("api_keys", {
   tenantId: uuid("tenant_id").references(() => tenants.id, { onDelete: "cascade" }).notNull(),
   keyPrefix: text("key_prefix").notNull().unique(), // e.g. "mtapper_live_AbCd1234"
   keyHash: text("key_hash").notNull(),              // sha256(full key), hex
+  // Default is read-only. Sending and flag write-back require messages:send / messages:write
+  // (or admin). New client keys get those scopes; this default stays narrow on purpose.
   scopes: text("scopes").array().notNull().default(["messages:read"]),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
   lastUsedIp: inet("last_used_ip"),

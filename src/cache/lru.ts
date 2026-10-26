@@ -30,6 +30,13 @@ export class TtlCache<V = unknown> {
     this.store.set(key, { value, expiresAt: Date.now() + ttlMs });
   }
 
+  /** Drop every entry whose key starts with `prefix` (used after a mailbox write). */
+  deletePrefix(prefix: string): void {
+    for (const key of [...this.store.keys()]) {
+      if (key.startsWith(prefix)) this.store.delete(key);
+    }
+  }
+
   clear(): void {
     this.store.clear();
   }

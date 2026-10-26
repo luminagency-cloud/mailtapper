@@ -2,7 +2,7 @@
   "name": "mailtapper",
   "version": "0.3.0",
   "private": true,
-  "description": "An access layer for email — connect any IMAP mailbox and read it as clean, unified JSON.",
+  "description": "An access layer for email — connect any IMAP mailbox and read or send it as clean JSON.",
   "type": "module",
   "engines": { "node": ">=20" },
   "scripts": {
@@ -14,7 +14,8 @@
     "db:push":     "doppler run -p mailtapper -c dev -- drizzle-kit push",
     "seed":        "doppler run -p mailtapper -c dev -- tsx src/scripts/seed.ts",
     "issue-key":   "doppler run -p mailtapper -c dev -- tsx src/scripts/issue-key.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "tsc -p tsconfig.test.json --noEmit && tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@fastify/rate-limit": "^9.1.0",

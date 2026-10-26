@@ -12,7 +12,7 @@ Node 20+, a Postgres URL (your Neon string), your mailbox's IMAP credentials, pl
 
 > **Heads-up — types.** `npm run dev` uses **tsx**, which transpiles without type-checking, so it **boots even if `npm run typecheck` still reports the minor ImapFlow type nits**. Run `npm run typecheck` separately to clean those up; it won't block booting.
 
-> mailtapper needs outbound IMAP (port 993) to your mail host. Fine locally and on the Ubuntu box.
+> mailtapper needs outbound IMAP (port 993) and, to send, outbound SMTP (587 or 465) to your mail host. Fine locally and on the Ubuntu box. The HTTPS caller does not.
 
 ---
 
@@ -116,13 +116,22 @@ Open **localhost:3001**, view the inbox — now populated with mail pulled **thr
 # on the box, in mailtapper/ with .env filled:
 docker compose up -d --build      # api + caddy; point the Caddyfile at your domain
 # luminmail's MAILTAPPER_BASE_URL then becomes https://api.yourdomain.com
+# No new database columns for send/mark-read (smtp_* and send_enabled already exist).
+# The host must allow outbound SMTP (587/465). Set SMTP_DEFAULT_* in .env or per connection.
+# Keys need messages:send and messages:write, or admin.
 ```
 
 ---
 
-## E. Sending settings (SMTP) — v1 step 1
+## E. Sending (SMTP) and mark-read
 
-Each connection can carry SMTP settings. This step only stores and verifies them; there is no send endpoint yet.
+Each connection carries its own SMTP settings. Host, port, and TLS fall back to `SMTP_DEFAULT_HOST`, `SMTP_DEFAULT_PORT`, and `SMTP_DEFAULT_TLS_MODE` when omitted. Username and password fall back to the IMAP login. Nothing is hard-coded.
+
+`POST /v1/connections/:id/send` needs scope `messages:send` (or `admin`). `POST /v1/messages/read` needs `messages:write` (or `admin`). A read-only `messages:read` key cannot do either. Re-issue a key with those scopes if the one you have is read-only:
+
+```bash
+npx tsx src/scripts/issue-key.ts messages:read,messages:send,messages:write <tenantId>
+```
 
 ```bash
 npm run db:push    # adds the smtp_* / send_enabled / from_name columns (all nullable or default false)
@@ -141,15 +150,29 @@ curl -sS -X PATCH localhost:3000/v1/connections/<CONNECTION_UUID> \
 # Re-check the SMTP login any time (nothing is sent):
 curl -sS -X POST localhost:3000/v1/connections/<CONNECTION_UUID>/test-smtp -H "authorization: Bearer $KEY"
 #   → {"ok":true,"message":"SMTP login succeeded.","smtp":{"host":"smtp.stackmail.com","port":587,...}}
+
+# Send. Use the mailbox's own host when it is not the StackMail default, for example
+# "smtp_host":"smtp.yourdomain.com","smtp_port":587,"smtp_tls_mode":"starttls".
+curl -sS -X POST localhost:3000/v1/connections/<CONNECTION_UUID>/send \
+  -H "authorization: Bearer $KEY" -H "content-type: application/json" \
+  -d '{"to":["someone@example.com"],"subject":"Hello","text":"Sent through mailtapper."}'
+#   → {"ok":true,"message_id":"<…>","accepted":["someone@example.com"],"saved_to_sent":true,...}
+
+# Mark messages read (or unread with "read": false). Ids come from GET /v1/messages.
+curl -sS -X POST localhost:3000/v1/messages/read \
+  -H "authorization: Bearer $KEY" -H "content-type: application/json" \
+  -d '{"ids":["<id-from-data>"],"read":true}'
+#   → {"read":true,"updated":["<id-from-data>"],"failed":[]}
 ```
 
 Separate SMTP login: pass `smtp_username` / `smtp_password` (send `null` to fall back to the IMAP login again).
 The dashboard's mailbox form has the same fields under "Sending (SMTP)", plus a "test SMTP" button per row.
+Sending appends a copy to the Sent folder when the server exposes one. `saved_to_sent: false` means the SMTP send succeeded and the copy did not.
 
 ## Gotchas recap
 
 - `.env` auto-loads via dotenv — no shell sourcing needed.
 - Ports: mailtapper `:3000`, luminmail `:3001`.
 - `npm run dev` runs despite the known type nits (tsx transpiles without type-checking).
-- In luminmail, `delete`/`reply`/`compose` are inert now — v1 mailtapper is read-only, which is expected for the dogfood.
+- luminmail's own compose/reply buttons stay inert until luminmail calls `POST /v1/connections/:id/send` and `POST /v1/messages/read`. Mailtapper itself can send and mark read.
 - mailtapper must be network-reachable from luminmail (localhost is fine on one machine; otherwise use the deployed URL).

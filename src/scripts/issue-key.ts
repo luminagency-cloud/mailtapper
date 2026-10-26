@@ -2,6 +2,7 @@
  * Issue an API key for an EXISTING tenant.
  *   npx tsx src/scripts/issue-key.ts                      # admin key (default), single tenant
  *   npx tsx src/scripts/issue-key.ts messages:read        # read-only key (for a consumer like luminmail)
+ *   npx tsx src/scripts/issue-key.ts messages:read,messages:send,messages:write
  *   npx tsx src/scripts/issue-key.ts messages:read <tenantId>
  * Scopes are comma-separated. Prints the raw key once — only its hash is stored.
  */

@@ -9,15 +9,17 @@ import { env } from "../env.js";
 import { TtlCache } from "../cache/lru.js";
 import { generateApiKey } from "../crypto/apikeys.js";
 import { testImapConnection } from "../imap/validator.js";
-import { testSmtpConnection, type SmtpCfg } from "../smtp/validator.js";
+import { markMessages, parseMarkReadBody } from "../imap/flags.js";
+import { formatSmtpError, testSmtpConnection, type SmtpCfg } from "../smtp/validator.js";
+import { assertSendable, deliverMail, mailboxFromAddress, parseSendBody, SEND_ROUTE_BODY_LIMIT } from "../smtp/send.js";
 import {
   getOrCreateTenantDek, loadDekById, encryptSecret, decryptSecret, encryptSmtpSecret, decryptSmtpSecret,
 } from "../crypto/envelope.js";
-import { searchAndFetch, fetchOne, type FetchTarget } from "../imap/fetch.js";
+import { appendToSent, fetchOne, searchAndFetch, setSeen, type FetchTarget } from "../imap/fetch.js";
 import { decodeLocator } from "../imap/locator.js";
 import { decodeCursor, encodeCursor } from "./cursor.js";
 import { dashboardHtml } from "./dashboard.js";
-import { forbidden, notFound } from "../util.js";
+import { forbidden, HttpError, notFound, upstream } from "../util.js";
 import type { Connection } from "../db/schema.js";
 import type { UnifiedMessage } from "../imap/normalize.js";
 
@@ -121,7 +123,7 @@ const updateBody = z.object({
   smtp_password: z.string().min(1).nullable().optional(),
 });
 
-const userKeyScopes = ["connections:read", "connections:write", "messages:read"];
+const userKeyScopes = ["connections:read", "connections:write", "messages:read", "messages:send", "messages:write"];
 
 const createClientBody = z.object({
   name: z.string().min(1),
@@ -496,6 +498,58 @@ export async function registerRoutes(app: FastifyInstance) {
     return { ...test, smtp: { host: cfg.host, port: cfg.port, tls_mode: cfg.tlsMode, username: cfg.username } };
   });
 
+  // Send as this mailbox. SMTP host/port/TLS come from the connection, then SMTP_DEFAULT_*.
+  // Username/password come from the connection's SMTP secret, then the IMAP login. Never retried.
+  app.post("/v1/connections/:id/send", { bodyLimit: SEND_ROUTE_BODY_LIMIT }, async (req) => {
+    const a = ctx(req);
+    requireScope(req, "messages:send");
+    const c = await loadConnection((req.params as { id: string }).id, a.tenantId);
+    const body = parseSendBody(req.body ?? {});
+    assertSendable(c);
+    const fromAddress = mailboxFromAddress(c);
+    const dek = await loadDekById(c.secretDekId!, a.tenantId);
+
+    let result;
+    try {
+      result = await deliverMail(resolveSmtpCfg(c), smtpPasswordFor(c, dek), {
+        ...body,
+        from: { name: c.fromName, address: fromAddress },
+      });
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      const message = formatSmtpError(err);
+      await db.update(schema.connections).set({ smtpLastError: message }).where(eq(schema.connections.id, c.id));
+      req.log.warn({ connectionId: c.id, err: message }, "smtp send failed");
+      throw upstream(message);
+    }
+
+    let saved: { saved: boolean; folder: string | null; error?: string };
+    try {
+      saved = await appendToSent(await buildTarget(c, a.tenantId), result.raw);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not save a copy to the Sent folder";
+      req.log.warn({ connectionId: c.id, err: message }, "sent-folder append failed");
+      saved = { saved: false, folder: null, error: message };
+    }
+
+    await db
+      .update(schema.connections)
+      .set({ smtpLastError: null, smtpLastValidatedAt: new Date() })
+      .where(eq(schema.connections.id, c.id));
+    req.log.info({ connectionId: c.id, messageId: result.messageId, savedToSent: saved.saved }, "message sent");
+
+    return {
+      ok: true,
+      connection_id: c.id,
+      message_id: result.messageId,
+      accepted: result.accepted,
+      rejected: result.rejected,
+      saved_to_sent: saved.saved,
+      sent_folder: saved.folder,
+      sent_error: saved.saved ? null : (saved.error ?? "Could not save a copy to the Sent folder"),
+    };
+  });
+
   // ---------- Data plane (live fetch) ----------
   app.get("/v1/messages", async (req) => {
     const a = ctx(req);
@@ -584,5 +638,21 @@ export async function registerRoutes(app: FastifyInstance) {
     const loc = decodeLocator((req.params as { id: string }).id);
     const c = await loadConnection(loc.connectionId, a.tenantId);
     return fetchOne(await buildTarget(c, a.tenantId), loc.folder, loc.uid, loc.uidValidity);
+  });
+
+  // Write `\Seen` back to the mailbox (the flag GET uses for is_unread). `read: false` clears it.
+  app.post("/v1/messages/read", async (req) => {
+    const a = ctx(req);
+    requireScope(req, "messages:write");
+    const body = parseMarkReadBody(req.body ?? {});
+    const result = await markMessages({
+      ids: body.ids,
+      read: body.read,
+      decode: (id) => decodeLocator(id),
+      load: (connectionId) => loadConnection(connectionId, a.tenantId),
+      apply: async (connection, _connectionId, items, read) => setSeen(await buildTarget(connection, a.tenantId), items, read),
+    });
+    if (result.updated.length > 0) messageCache.deletePrefix(`${a.tenantId}:`);
+    return { read: body.read, updated: result.updated, failed: result.failed };
   });
 }
