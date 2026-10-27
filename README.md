@@ -137,6 +137,17 @@ Backups stay on the VM's own disk. Copy them off now and then, together with the
 
 Public URL is `https://mailtapper.luminagency.com`. Cloudflare (zone `luminagency.com`) has `A mailtapper → 34.148.236.200`, **DNS only** (not proxied). That overrides the proxied `*.luminagency.com` wildcard so Caddy can obtain the certificate. On the VM, `.env` sets `MAILTAPPER_DOMAIN=mailtapper.luminagency.com` and `PUBLIC_BASE_URL=https://mailtapper.luminagency.com/`. Caddy serves that name and renews the Let's Encrypt certificate itself (ports 80 and 443 must stay open).
 
+## Reading and search
+
+```bash
+# Newest mail across all active connections (omit connection_id), filtered:
+curl -sS "localhost:3000/v1/messages?q=acme%20invoice&unread=true&limit=10" -H "authorization: Bearer $KEY"
+```
+
+Filters: `since`, `from`, `subject`, `unread=true`, `connection_id`, `limit`, `cursor`, and `q` for full text. `q` uses IMAP `SEARCH TEXT`, so it matches the subject, other headers and the body. The mail server runs the search. It works on normal IMAP hosts but can be slow on big mailboxes. All filters are combined with AND.
+
+A failed connection check (create, update, `/test`, `/test-smtp`) returns `side` (`receive` = IMAP, `send` = SMTP), `field` (the setting to fix, for example `smtp_tls_mode`) and a `hint`, as well as `error`.
+
 ## Sending and mark-read
 
 Both routes use the same Bearer API key as the read endpoints. A key needs `messages:send` to send and `messages:write` to mark read or unread (`admin` includes both). A `messages:read` key cannot do either. Unauthenticated calls are rejected.
@@ -168,6 +179,18 @@ curl -sS -X POST localhost:3000/v1/messages/read \
 ```
 
 Limits: 50 recipients, 1 MiB combined text+html, 100 ids per mark-read call. Header fields reject CR/LF. A successful send appends the same bytes to the IMAP Sent folder when the server has one (`\Sent`, or a folder named Sent). If that copy fails, the send result is still success and `saved_to_sent` is false.
+
+## Live round-trip check
+
+`npm run test:roundtrip` sends real mail. Mailbox A sends to B and B sends to A, with the subject `MailTapper test <timestamp>`. Then it polls each INBOX through `/v1/messages` until the message arrives. It is not part of `npm test`.
+
+```bash
+MAILTAPPER_API_KEY=mtapper_live_... npm run test:roundtrip
+# optional: MAILTAPPER_BASE_URL (default https://mailtapper.luminagency.com), ROUNDTRIP_A / ROUNDTRIP_B (connection ids),
+#           ROUNDTRIP_TIMEOUT_SECONDS (default 120)
+```
+
+The key needs `connections:read`, `messages:read` and `messages:send`. Without `ROUNDTRIP_A`/`ROUNDTRIP_B`, it uses the first two active connections that can send. Each direction prints `PASS`, `FAIL (send side)` or `FAIL (receive side)`. The exit code is 0 only when both pass.
 
 ## Status
 

@@ -24,7 +24,19 @@ export interface SearchQuery {
   from?: string;
   unread?: boolean;
   subject?: string;
+  /** Free text: IMAP TEXT, which matches headers (subject included) and body. Server-side, best effort. */
+  text?: string;
   limit: number;
+}
+
+/** Map the API filters onto one IMAP SEARCH (all criteria ANDed). */
+export function buildSearchCriteria(q: SearchQuery): SearchObject {
+  const criteria: SearchObject = { since: q.since };
+  if (q.unread) criteria.seen = false;
+  if (q.from) criteria.from = q.from;
+  if (q.subject) criteria.subject = q.subject;
+  if (q.text) criteria.text = q.text;
+  return criteria;
 }
 
 /**
@@ -98,12 +110,7 @@ export async function searchAndFetch(
       const ceiling =
         opts.expectUidValidity !== undefined && opts.expectUidValidity !== uidValidity ? undefined : opts.afterUid;
 
-      const criteria: SearchObject = { since: q.since };
-      if (q.unread) criteria.seen = false;
-      if (q.from) criteria.from = q.from;
-      if (q.subject) criteria.subject = q.subject;
-
-      let uids = (await client.search(criteria, { uid: true })) || [];
+      let uids = (await client.search(buildSearchCriteria(q), { uid: true })) || [];
       uids.sort((x, y) => x - y); // ascending; uid asc ~= arrival asc
       if (ceiling !== undefined) uids = uids.filter((u) => u < ceiling);
       const page = uids.slice(-q.limit).reverse(); // newest `limit`, newest first
