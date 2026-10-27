@@ -112,7 +112,7 @@ Open **localhost:3001**, view the inbox — now populated with mail pulled **thr
 
 ## D. Production (Google Cloud VM)
 
-Production runs on the always-free Google Cloud e2-micro VM `mailtapper` (project `lumin-all`, us-east1-b), with Docker Compose, a local Postgres and Caddy. Everything about it is in the README's **[Hosting & deployment](../README.md#hosting--deployment)** section: SSH, `.env`, redeploy, migrations, backups and domain. On the VM, `luminmail`'s `MAILTAPPER_BASE_URL` is `https://34-148-236-200.sslip.io`, or `https://mailtapper.luminagency.com` once DNS is added.
+Production runs on the always-free Google Cloud e2-micro VM `mailtapper` (project `lumin-all`, us-east1-b), with Docker Compose, a local Postgres and Caddy. Everything about it is in the README's **[Hosting & deployment](../README.md#hosting--deployment)** section: SSH, `.env`, redeploy, migrations, backups and domain. On the VM, `luminmail`'s `MAILTAPPER_BASE_URL` is `https://mailtapper.luminagency.com`.
 
 - No new database columns for send/mark-read (smtp_* and send_enabled already exist).
 - The VM allows outbound SMTP 587 (Google blocks only 25). `SMTP_DEFAULT_*` in `.env` points at `smtp.luminagency.com:587` STARTTLS.

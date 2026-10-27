@@ -64,7 +64,7 @@ Node + TypeScript · Fastify · ImapFlow · Nodemailer · Postgres · Docker + C
 
 | | |
 |---|---|
-| Public URL | `https://34-148-236-200.sslip.io` (switch to `https://mailtapper.luminagency.com` once that DNS record exists, see below) |
+| Public URL | `https://mailtapper.luminagency.com` |
 | Health check | `GET /healthz` → `{"ok":true,...}` |
 | External IP | `34.148.236.200` (internal `10.142.0.2`). Make it a **static** IP in VPC network → IP addresses, or it can change if the VM is stopped. |
 | Open ports | 80/443 only (GCP firewall `default-allow-http` / `default-allow-https`, plus SSH 22). Postgres and the API port 3000 are not published. |
@@ -86,7 +86,7 @@ Node + TypeScript · Fastify · ImapFlow · Nodemailer · Postgres · Docker + C
 
 `.env` sets `COMPOSE_FILE=docker-compose.yml:deploy/gcp/compose.gcp.yml` and `COMPOSE_PROJECT_NAME=mailtapper`, so a plain `docker compose ...` in `~/mailtapper` uses the overlay. Services are `api` (Node, 384 MB cap), `db` (postgres:16-alpine, 256 MB cap, volume `mailtapper_pg_data`) and `caddy` (128 MB cap, certs in volume `mailtapper_caddy_data`). All are `restart: unless-stopped` and Docker is enabled at boot, so the stack comes back on reboot (tested). Unattended security upgrades are on.
 
-`.env` keys: `COMPOSE_FILE`, `COMPOSE_PROJECT_NAME`, `MAILTAPPER_DOMAIN`, `POSTGRES_PASSWORD`, `DATABASE_URL` (`postgres://mailtapper:…@db:5432/mailtapper?sslmode=disable`), `MAILTAPPER_KEK_B64`, `MAILTAPPER_LOCATOR_SECRET`, `PORT=3000`, `PUBLIC_BASE_URL`, `LOG_LEVEL`, `CACHE_TTL_SECONDS`, `DEFAULT_TIER`, `SMTP_DEFAULT_HOST=smtp.luminagency.com`, `SMTP_DEFAULT_PORT=587`, `SMTP_DEFAULT_TLS_MODE=starttls`. Secrets were generated on the VM with `openssl rand`.
+`.env` keys: `COMPOSE_FILE`, `COMPOSE_PROJECT_NAME`, `MAILTAPPER_DOMAIN=mailtapper.luminagency.com`, `POSTGRES_PASSWORD`, `DATABASE_URL` (`postgres://mailtapper:…@db:5432/mailtapper?sslmode=disable`), `MAILTAPPER_KEK_B64`, `MAILTAPPER_LOCATOR_SECRET`, `PORT=3000`, `PUBLIC_BASE_URL=https://mailtapper.luminagency.com/`, `LOG_LEVEL`, `CACHE_TTL_SECONDS`, `DEFAULT_TIER`, `SMTP_DEFAULT_HOST=smtp.luminagency.com`, `SMTP_DEFAULT_PORT=587`, `SMTP_DEFAULT_TLS_MODE=starttls`. Secrets were generated on the VM with `openssl rand`.
 
 > **Back up `MAILTAPPER_KEK_B64`** (for example in a password manager). If it's lost, every stored mailbox password becomes unreadable, and the database backups can't be decrypted either.
 
@@ -133,10 +133,7 @@ Backups stay on the VM's own disk. Copy them off now and then, together with the
 
 ### Domain / TLS
 
-Caddy serves whatever `MAILTAPPER_DOMAIN` in `.env` lists and gets the certificates itself. The current value is `34-148-236-200.sslip.io`, a wildcard DNS name that needs no setup. To move to the real domain:
-
-1. In Cloudflare (zone `luminagency.com`), add `A mailtapper → 34.148.236.200` with **DNS only** (grey cloud). It must not be proxied, so Caddy can get a Let's Encrypt cert. It also overrides the proxied `*.luminagency.com` wildcard.
-2. On the VM, set `MAILTAPPER_DOMAIN="mailtapper.luminagency.com 34-148-236-200.sslip.io"` and `PUBLIC_BASE_URL=https://mailtapper.luminagency.com/`, then run `docker compose up -d`.
+Public URL is `https://mailtapper.luminagency.com`. Cloudflare (zone `luminagency.com`) has `A mailtapper → 34.148.236.200`, **DNS only** (not proxied). That overrides the proxied `*.luminagency.com` wildcard so Caddy can obtain the certificate. On the VM, `.env` sets `MAILTAPPER_DOMAIN=mailtapper.luminagency.com` and `PUBLIC_BASE_URL=https://mailtapper.luminagency.com/`. Caddy serves that name and renews the Let's Encrypt certificate itself (ports 80 and 443 must stay open).
 
 ## Sending and mark-read
 

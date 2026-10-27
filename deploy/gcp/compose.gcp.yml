@@ -1,4 +1,7 @@
 # Google Cloud VM overlay (VM "mailtapper", project lumin-all).
+# Public URL: https://mailtapper.luminagency.com
+# VM .env: MAILTAPPER_DOMAIN=mailtapper.luminagency.com
+#          PUBLIC_BASE_URL=https://mailtapper.luminagency.com/
 # Activated on the VM via COMPOSE_FILE=docker-compose.yml:deploy/gcp/compose.gcp.yml in .env,
 # so a plain `docker compose up -d --build` uses it. Adds a local Postgres and tight memory caps
 # for the 1 GB e2-micro, and points Caddy at deploy/gcp/Caddyfile.

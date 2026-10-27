@@ -48,7 +48,7 @@
 <li><strong>Multi-tenant from row one</strong>, per-tenant API keys.</li>
 <li><strong>Built to hold credentials safely:</strong> explicit per-connection TLS, envelope-encrypted secrets.</li>
 </ul>
-<p><strong>Stack:</strong> Node 20 + TypeScript, Fastify, ImapFlow, mailparser + html-to-text, Postgres (vanilla SQL), Docker + Caddy. Production hosting is the Google Cloud VM described in the <a href="README.md#hosting--deployment">README</a>.</p>
+<p><strong>Stack:</strong> Node 20 + TypeScript, Fastify, ImapFlow, mailparser + html-to-text, Postgres (vanilla SQL), Docker + Caddy. Production is <a href="https://mailtapper.luminagency.com">https://mailtapper.luminagency.com</a> on the Google Cloud VM; details are in the <a href="README.md#hosting--deployment">README</a>.</p>
 <p><strong>Not in v1:</strong> push/webhooks, POP3, multi-folder, attachment bytes, OAuth providers (Gmail/M365), self-host, metered billing — tracked in Linear (team LA, project Mailtapper). Sending and mark-read write-back are in v1.</p>
 <h2>Architecture</h2>
 <pre><code>                          rate-limit / authz / clamp to tier caps
@@ -66,7 +66,7 @@ caller (AI / automation) --&gt;
 <table>
 <tr><th>Service</th><th>Role</th></tr>
 <tr><td>api</td><td>Fastify; serves control + data plane; holds the in-memory cache and the IMAP connection pool. Stateless across restarts.</td></tr>
-<tr><td>caddy</td><td>Reverse proxy + automatic HTTPS. The live hostname is set on the VM; see the README.</td></tr>
+<tr><td>caddy</td><td>Reverse proxy + automatic HTTPS for <code>mailtapper.luminagency.com</code>.</td></tr>
 <tr><td>db</td><td>Postgres. Tiny — connections + keys only, no mail. Production runs Postgres 16 in the compose stack.</td></tr>
 </table>
 <p><strong>No background worker in v1.</strong> Because we don't store or push, there's nothing to poll on a schedule — fetching happens inside the request. (A worker returns only if push/webhooks are added later.)</p>
@@ -224,7 +224,7 @@ CREATE TABLE connections (
 <li><strong>Thin cache:</strong> in-memory LRU keyed by (tenant, normalized-query) and by (connection, uid) for single messages; short TTL (default ~60s, configurable). Wipeable at any instant with zero data loss — the mailbox is always the source of truth. It is a performance buffer, not storage.</li>
 </ul>
 <h2>Deployment</h2>
-<p>No worker in v1. Production is a Google Cloud e2-micro VM: Docker Compose runs the API, Caddy, and local Postgres 16 (<code>deploy/gcp/compose.gcp.yml</code> layered on <code>docker-compose.yml</code>). Where it runs, and how to SSH, update, migrate, and back up, is only in the README: <a href="README.md#hosting--deployment">Hosting &amp; deployment</a>.</p>
+<p>No worker in v1. Production is <a href="https://mailtapper.luminagency.com">https://mailtapper.luminagency.com</a> on a Google Cloud e2-micro VM: Docker Compose runs the API, Caddy, and local Postgres 16 (<code>deploy/gcp/compose.gcp.yml</code> layered on <code>docker-compose.yml</code>). Where it runs, and how to SSH, update, migrate, and back up, is only in the README: <a href="README.md#hosting--deployment">Hosting &amp; deployment</a>.</p>
 <p>Migrations via Drizzle on deploy. The schema is vanilla Postgres, so a local or Neon <code>DATABASE_URL</code> works the same way for development.</p>
 <h2>Scope &amp; Deferred</h2>
 <p><strong>v1 (this spec):</strong> IMAP read, SMTP send, IMAP <code>\Seen</code> write-back, pull-only live fetch + thin cache, INBOX, bounded/paginated queries with tier caps, per-tenant scoped API keys, envelope-encrypted credentials, connection-hygiene layer. DB = config + keys only (sent and read state stay on the mail server).</p>

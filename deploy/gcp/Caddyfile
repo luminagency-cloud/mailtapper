@@ -1,4 +1,5 @@
-# MAILTAPPER_DOMAIN comes from .env on the VM (space-separated list allowed).
+# MAILTAPPER_DOMAIN comes from .env on the VM.
+# Production: mailtapper.luminagency.com (https://mailtapper.luminagency.com).
 # Caddy gets and renews Let's Encrypt certs automatically (needs ports 80/443 open).
 {$MAILTAPPER_DOMAIN} {
 	encode gzip
