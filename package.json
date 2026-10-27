@@ -1,8 +1,8 @@
 {
   "name": "mailtapper",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
-  "description": "An access layer for email — connect any IMAP mailbox and read or send it as clean JSON.",
+  "description": "A mail bridge for AI agents — read and send non-Gmail, non-Microsoft 365 mailboxes as clean JSON.",
   "type": "module",
   "engines": { "node": ">=20" },
   "scripts": {

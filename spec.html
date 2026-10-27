@@ -35,12 +35,14 @@
 <div class="wrap">
   <header>
     <h1>🛠️ mailtapper — Build Spec (v1)</h1>
-    <p class="sub">An access layer for email. Canonical v1 build spec — access-layer model, live fetch, no stored mail.</p>
+    <p class="sub">A mail bridge for AI agents. Canonical v1 build spec — live read and send, no stored mail, no background polling.</p>
     <p class="meta">Portable snapshot. Authoritative working copy lives in the project workspace. Last synced 2026‑06‑21.</p>
   </header>
 <h2>Overview &amp; Principles</h2>
-<p><strong>Mailtapper</strong> is an access layer for email: connect any IMAP mailbox and read it as clean, unified JSON through one API. Built for AI agents and automations, not humans. This is the <strong>v1</strong> build spec.</p>
-<p><strong>Model: access layer (live fetch + thin cache).</strong> Mailtapper fetches from the mailbox on demand, normalizes, and returns — it does <strong>not</strong> store mail. The mailbox is the source of truth; the caller owns any durable copy. A short-TTL cache and a connection-hygiene layer make live fetch fast and resilient.</p>
+<p><strong>Mailtapper</strong> is a mail bridge for AI agents: read (IMAP/POP) and send (SMTP) access to non-Gmail, non-Microsoft 365 mailboxes (cPanel-style hosts such as 20i and GoDaddy) as clean JSON. This is the <strong>v1</strong> build spec.</p>
+<p><strong>What it is:</strong> an API for agents to read, search, and send mail.</p>
+<p><strong>What it is not:</strong> a human mail client; a Gmail or Microsoft 365 connector (agents already have native access to those); a notification or push service (it only touches a mailbox when an agent asks; nothing polls in the background). It also does <strong>not</strong> store mail. The mailbox is the source of truth; the caller owns any durable copy. A short-TTL cache and a connection-hygiene layer make live fetch fast and resilient.</p>
+<p><strong>Product rule:</strong> features are built only when a real agent workflow needs them. No bloat. The roadmap is the Linear Mailtapper project (team LA).</p>
 <p><strong>Principles</strong></p>
 <ul>
 <li><strong>Fetch service, not a store.</strong> No mail database, no retention. Minimal liability: we hold credentials, not contents.</li>
@@ -49,7 +51,7 @@
 <li><strong>Built to hold credentials safely:</strong> explicit per-connection TLS, envelope-encrypted secrets.</li>
 </ul>
 <p><strong>Stack:</strong> Node 20 + TypeScript, Fastify, ImapFlow, mailparser + html-to-text, Postgres (vanilla SQL), Docker + Caddy. Production is <a href="https://mailtapper.luminagency.com">https://mailtapper.luminagency.com</a> on the Google Cloud VM; details are in the <a href="README.md#hosting--deployment">README</a>.</p>
-<p><strong>Not in v1:</strong> push/webhooks, POP3, multi-folder, attachment bytes, OAuth providers (Gmail/M365), self-host, metered billing — tracked in Linear (team LA, project Mailtapper). Sending and mark-read write-back are in v1.</p>
+<p><strong>Out of scope:</strong> a human mail client, Gmail and Microsoft 365 connectors, and notification/push. <strong>Not in v1</strong> unless a real agent workflow needs them: POP3, multi-folder, attachment bytes, self-host, metered billing — tracked in Linear (team LA, project Mailtapper). Sending and mark-read write-back are in v1.</p>
 <h2>Architecture</h2>
 <pre><code>                          rate-limit / authz / clamp to tier caps
 caller (AI / automation) --&gt;
@@ -69,7 +71,7 @@ caller (AI / automation) --&gt;
 <tr><td>caddy</td><td>Reverse proxy + automatic HTTPS for <code>mailtapper.luminagency.com</code>.</td></tr>
 <tr><td>db</td><td>Postgres. Tiny — connections + keys only, no mail. Production runs Postgres 16 in the compose stack.</td></tr>
 </table>
-<p><strong>No background worker in v1.</strong> Because we don't store or push, there's nothing to poll on a schedule — fetching happens inside the request. (A worker returns only if push/webhooks are added later.)</p>
+<p><strong>No background worker.</strong> Because this is not a notification or push service, nothing polls on a schedule — fetching happens inside the request, when an agent asks.</p>
 <h2>Data Model</h2>
 <p>No <code>messages</code> or <code>sync_state</code> tables — we don't store mail. The DB holds config + credentials only.</p>
 <pre><code>CREATE TABLE tenants (
@@ -224,13 +226,13 @@ CREATE TABLE connections (
 <li><strong>Thin cache:</strong> in-memory LRU keyed by (tenant, normalized-query) and by (connection, uid) for single messages; short TTL (default ~60s, configurable). Wipeable at any instant with zero data loss — the mailbox is always the source of truth. It is a performance buffer, not storage.</li>
 </ul>
 <h2>Deployment</h2>
-<p>No worker in v1. Production is <a href="https://mailtapper.luminagency.com">https://mailtapper.luminagency.com</a> on a Google Cloud e2-micro VM: Docker Compose runs the API, Caddy, and local Postgres 16 (<code>deploy/gcp/compose.gcp.yml</code> layered on <code>docker-compose.yml</code>). Where it runs, and how to SSH, update, migrate, and back up, is only in the README: <a href="README.md#hosting--deployment">Hosting &amp; deployment</a>.</p>
+<p>No worker. Production is <a href="https://mailtapper.luminagency.com">https://mailtapper.luminagency.com</a> on a Google Cloud e2-micro VM: Docker Compose runs the API, Caddy, and local Postgres 16 (<code>deploy/gcp/compose.gcp.yml</code> layered on <code>docker-compose.yml</code>). Where it runs, and how to SSH, update, migrate, and back up, is only in the README: <a href="README.md#hosting--deployment">Hosting &amp; deployment</a>.</p>
 <p>Migrations via Drizzle on deploy. The schema is vanilla Postgres, so a local or Neon <code>DATABASE_URL</code> works the same way for development.</p>
 <h2>Scope &amp; Deferred</h2>
 <p><strong>v1 (this spec):</strong> IMAP read, SMTP send, IMAP <code>\Seen</code> write-back, pull-only live fetch + thin cache, INBOX, bounded/paginated queries with tier caps, per-tenant scoped API keys, envelope-encrypted credentials, connection-hygiene layer. DB = config + keys only (sent and read state stay on the mail server).</p>
-<p><strong>Decided: pull-only (no push) for v1.</strong> Callers poll the data plane on their own cadence; mailtapper holds no per-connection cursor and runs no background worker. Rationale: the ICP (polling agents/automations) doesn't need real-time delivery; push would reintroduce the worker + persistent cursor + delivery infra the access-layer model deliberately removed, and would invert the cost profile to continuous background IMAP polling. "Opt-in" would limit runtime load but not build scope. Deferring is free: push is purely additive (the read contract is unchanged).</p>
+<p><strong>Decided: pull-only.</strong> Callers ask for mail on their own cadence; mailtapper holds no per-connection cursor and runs no background worker. It is not a notification or push service. It only touches a mailbox when an agent asks.</p>
 <p><strong>Key trade-off accepted:</strong> no stored full-text index -&gt; search limited to IMAP SEARCH (reliable on headers/since/from/unread/subject; full-body best-effort).</p>
-<p><strong>Deferred (Linear, team LA, project Mailtapper):</strong> push/webhooks (v3 candidate, demand-gated), POP3, multi-folder, attachment bytes, Microsoft 365 &amp; Gmail (OAuth), self-host, metered billing, optional stored-index/cache tier for rich search &amp; longer retention.</p>
+<p><strong>Out of scope:</strong> Gmail and Microsoft 365 connectors, and notification/push. <strong>Deferred (Linear, team LA, project Mailtapper), and only if a real agent workflow needs them:</strong> POP3, multi-folder, attachment bytes, self-host, metered billing, optional stored-index/cache tier for rich search and longer retention.</p>
 <p><strong>Open decisions</strong> (including the pricing model) are tracked in Linear, not in the roadmap.</p>
 
   <footer>mailtapper — generated spec snapshot. Keep in sync with the working copy on material changes.</footer>

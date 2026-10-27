@@ -42,7 +42,7 @@
 <div class="wrap">
   <header>
     <h1>🗺️ mailtapper — Roadmap</h1>
-    <p class="sub">An access layer for email. Committed v1 scope and the decision record.</p>
+    <p class="sub">A mail bridge for AI agents. Committed v1 scope and the decision record.</p>
     <p class="lead">Future work and open decisions are tracked in Linear (team LA, project Mailtapper), not in this file.</p>
   </header>
 
@@ -61,12 +61,12 @@
 
   <section>
     <h2><span class="num">1</span>v1 — Committed scope</h2>
-    <p><strong>Identity:</strong> an access layer / fetch service. Not a mail client, not a store. The mailbox is the source of truth; the caller owns durable data.</p>
+    <p><strong>Identity:</strong> a mail bridge for AI agents. An API to read, search, and send on non-Gmail, non-Microsoft 365 mailboxes (cPanel-style hosts). Not a human mail client, not a Gmail or Microsoft 365 connector, not a notification or push service, and not a store. The mailbox is the source of truth; the caller owns durable data. Features are built only when a real agent workflow needs them. The roadmap is the Linear Mailtapper project (team LA).</p>
     <ul>
       <li><strong>IMAP</strong> for read and for mark-read write-back. <strong>SMTP</strong> for send, using each mailbox's saved settings (host/port/TLS default from env; username and password from the encrypted connection).</li>
       <li><strong>Send:</strong> <code>POST /v1/connections/:id/send</code> (to/cc/bcc, text and/or html, reply headers). Returns the SMTP message id. A copy is appended to the Sent folder when the server has one.</li>
       <li><strong>Mark read / unread:</strong> <code>POST /v1/messages/read</code> writes the IMAP <code>\Seen</code> flag for one or more message ids — the same flag the read path uses for <code>is_unread</code>.</li>
-      <li><strong>Model: access layer + thin cache</strong> — live fetch on demand; connection hygiene (per-host connection reuse, concurrency cap, retry + backoff); short-TTL cache. <strong>No long-term mail storage.</strong></li>
+      <li><strong>Model: live fetch + thin cache</strong> — fetch when an agent asks; connection hygiene (per-host connection reuse, concurrency cap, retry + backoff); short-TTL cache. <strong>No long-term mail storage. No background polling.</strong></li>
       <li><strong>Control plane:</strong> register/manage connections — host, port, <strong>explicit TLS mode</strong> (ssl / starttls / none), allow-invalid-cert, username, password. Validated before save, encrypted at rest.</li>
       <li><strong>Data plane:</strong> query normalized mail by account, sender, time window, unread, full-text → one <strong>unified JSON</strong> shape.</li>
       <li><strong>Unified message:</strong> content-hash <code>internal_id</code> (caller dedupe) + opaque <code>id</code> locator (live single-message re-fetch), <code>provider</code> tag, <code>has_attachments</code> + metadata, clean <strong>HTML-stripped</strong> <code>body_text</code>.</li>
@@ -98,7 +98,7 @@
     <h2><span class="num">3</span>Decision record</h2>
     <table>
       <tr><th>Decision</th><th>Status</th></tr>
-      <tr><td><strong>Pull-only vs push</strong></td><td><span class="ok">✓ Resolved</span> — pull-only for v1. Push → v3 candidate, demand-gated.</td></tr>
+      <tr><td><strong>Pull-only vs push</strong></td><td><span class="ok">✓ Resolved</span> — pull-only. Not a notification or push service. Nothing polls in the background.</td></tr>
       <tr><td><strong>Name</strong></td><td><span class="ok">✓ Resolved</span> — mailtapper.</td></tr>
       <tr><td><strong>External validation (5-yes test)</strong></td><td>Deferred to <strong>v2</strong> — v1 is dogfood-for-self.</td></tr>
       <tr><td><strong>v1 audience / consumer</strong></td><td><span class="ok">✓ Resolved</span> — the founder only, dogfooded via luminmail (built testbed + first consumer). AI planner is a future consumer, not yet built.</td></tr>
@@ -112,7 +112,7 @@
       <li><strong>luminmail = first test client</strong> — one-line swap (its sync → <code>GET /v1/messages</code>) to prove the data plane end-to-end. Throwaway otherwise.</li>
       <li><strong>Lifted-and-fixed assets</strong> from luminmail: the IMAP connection validator and the AES-256-GCM crypto.</li>
       <li><strong>Competitor intel:</strong> mailbridge.app solves the same problem but is <strong>locked to Gmail</strong> — validates the wedge and underlines the non-Gmail differentiator.</li>
-      <li><strong>"Memory access layer"</strong> is the positioning phrase — mailtapper is the lens, not the warehouse.</li>
+      <li><strong>Positioning:</strong> a mail bridge for AI agents — the lens on non-Gmail mailboxes, not the warehouse, not a client, and not a push service.</li>
     </ul>
   </section>
 

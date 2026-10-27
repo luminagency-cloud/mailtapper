@@ -40,7 +40,7 @@ Verify (new terminal):
 
 ```bash
 curl -s localhost:3000/healthz
-# {"ok":true,"service":"mailtapper","version":"0.1.0"}
+# {"ok":true,"service":"mailtapper","version":"0.4.0"}  # version comes from package.json
 ```
 
 ---

@@ -20,6 +20,7 @@ import { decodeLocator } from "../imap/locator.js";
 import { decodeCursor, encodeCursor } from "./cursor.js";
 import { dashboardHtml } from "./dashboard.js";
 import { forbidden, HttpError, notFound, upstream } from "../util.js";
+import { serviceVersion } from "../version.js";
 import type { Connection } from "../db/schema.js";
 import type { UnifiedMessage } from "../imap/normalize.js";
 
@@ -131,7 +132,7 @@ const createClientBody = z.object({
 });
 
 export async function registerRoutes(app: FastifyInstance) {
-  app.get("/healthz", async () => ({ ok: true, service: "mailtapper", version: "0.1.0" }));
+  app.get("/healthz", async () => ({ ok: true, service: "mailtapper", version: serviceVersion }));
 
   // The only human surface: a thin connection-manager page (served unauthenticated; it holds
   // no secrets — the operator pastes an API key client-side for the /v1/* calls it makes).

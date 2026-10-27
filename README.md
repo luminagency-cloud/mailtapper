@@ -1,6 +1,6 @@
 # Mailtapper
 
-**An access layer for email.** Connect any IMAP/POP mailbox and read it as clean, unified JSON through one API — built for AI agents and automations, not humans.
+**A mail bridge for AI agents.** It gives bots read (IMAP/POP) and send (SMTP) access to non-Gmail, non-Microsoft 365 mailboxes — cPanel-style hosts like 20i, GoDaddy, and the rest.
 
 > ⚠️ Early development. The API and spec are still being defined; not yet released.
 
@@ -13,14 +13,16 @@
 
 ## What it is
 
-Mailtapper turns scattered email accounts into one clean, queryable API. Point it at a mailbox and your agents read that mail as normalized JSON — no raw IMAP, no MIME parsing, no per-provider quirks. The same API can send as that mailbox and write the read/unread flag back, so a caller that cannot open SMTP or IMAP ports can still do both over HTTPS.
+- **An API for agents to read, search, and send mail.** Point it at a mailbox and the agent gets normalized JSON — no raw IMAP, no MIME parsing, no per-provider quirks. The same call can send as that mailbox and write the read/unread flag back, over HTTPS.
 
-It's deliberately narrow: the long tail of **non-Gmail, non-Microsoft 365** mailboxes — the hosted/cPanel IMAP boxes (GoDaddy, 20i, Bluehost, Hostinger…) that other tools ignore because they're unglamorous to support. Gmail and M365 are already solved everywhere; Mailtapper is for everything else.
+## What it is not
 
-## What it is *not*
+- **Not a human mail client.** There is no reading UI. Other tools call the API.
+- **Not a Gmail or Microsoft 365 connector.** Agents already have native access to those.
+- **Not a notification or push service.** It only touches a mailbox when an agent asks. Nothing polls in the background.
+- **Not a store or archive of mail.** The mailbox is the source of truth. Mailtapper fetches on demand and caches only briefly (seconds–minutes). The caller owns anything it keeps.
 
-- **Not a mail client / inbox app** — there's no reading UI; it's infrastructure other tools call.
-- **Not a store or archive of your mail** — the mailbox is the source of truth. Mailtapper fetches on demand and caches only briefly (seconds–minutes) for speed; the *caller* owns anything it keeps.
+**Product rule:** features are built only when a real agent workflow needs them. No bloat. The roadmap is the Linear Mailtapper project (team LA).
 
 ## How it works
 
@@ -171,4 +173,4 @@ Limits: 50 recipients, 1 MiB combined text+html, 100 ids per mark-read call. Hea
 
 **v1 (in progress):** IMAP read, SMTP send, mark-read write-back, live fetch + thin cache, per-tenant API keys.
 
-**Later:** POP3 · webhooks/push · attachment fetch · Microsoft 365 & Gmail (OAuth).
+**Later:** only what a real agent workflow needs, tracked in Linear (team LA, project Mailtapper). Gmail and Microsoft 365 are out of scope. Nothing polls or pushes in the background.

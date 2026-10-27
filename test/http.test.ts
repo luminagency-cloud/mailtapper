@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import type { FastifyInstance } from "fastify";
 import { after, before, describe, it } from "node:test";
 import "./block-network.js";
@@ -63,6 +64,8 @@ describe("send and mark-read auth", () => {
 
     const health = await app.inject({ method: "GET", url: "/healthz" });
     assert.equal(health.statusCode, 200);
+    const expectedVersion = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
+    assert.equal(health.json().version, expectedVersion);
   });
 
   it("does not let a read-only key satisfy send or mark-read scopes", async () => {

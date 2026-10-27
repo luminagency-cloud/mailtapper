@@ -1,4 +1,4 @@
-# mailtapper v1 — pull-only access layer. No worker service (nothing is polled/stored).
+# mailtapper — mail bridge for AI agents. Pull-only: no worker, nothing is polled or stored.
 # Production on the GCP VM also loads deploy/gcp/compose.gcp.yml (see README "Hosting & deployment").
 services:
   api:
