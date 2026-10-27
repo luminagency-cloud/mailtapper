@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import "./block-network.js";
-import { diagnoseMailError } from "../src/imap/validator.js";
+import { buildClient, diagnoseMailError } from "../src/imap/validator.js";
+
+describe("buildClient", () => {
+  it("survives an 'error' event (production crash: logout after a socket timeout)", () => {
+    const client = buildClient({ host: "imap.example.com", port: 993, tlsMode: "ssl", allowInvalidCert: false, username: "u" }, "p");
+    assert.doesNotThrow(() => client.emit("error", new Error("Connection not available")));
+  });
+});
 
 const err = (message: string, extra: Record<string, unknown> = {}) => Object.assign(new Error(message), extra);
 

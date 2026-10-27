@@ -10,7 +10,7 @@ export interface ConnCfg {
 
 /** Build an ImapFlow client with EXPLICIT TLS (never guessed from the port). */
 export function buildClient(cfg: ConnCfg, password: string): ImapFlow {
-  return new ImapFlow({
+  const client = new ImapFlow({
     host: cfg.host,
     port: cfg.port,
     secure: cfg.tlsMode === "ssl", // 'starttls' -> secure:false, ImapFlow upgrades when advertised
@@ -21,6 +21,10 @@ export function buildClient(cfg: ConnCfg, password: string): ImapFlow {
     socketTimeout: 30_000,
     logger: false,
   });
+  // The failure also rejects the pending call, which callers handle. Without a listener, a late
+  // 'error' event (e.g. logout() after a socket timeout) is unhandled and kills the whole process.
+  client.on("error", () => {});
+  return client;
 }
 
 /** Translate raw IMAP/socket errors into something a user can act on. */
