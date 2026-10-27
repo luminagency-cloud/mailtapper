@@ -8,7 +8,7 @@ import { TIERS, clampLimit, resolveSince } from "./limits.js";
 import { env } from "../env.js";
 import { TtlCache } from "../cache/lru.js";
 import { generateApiKey } from "../crypto/apikeys.js";
-import { testImapConnection } from "../imap/validator.js";
+import { testImapConnection, type MailDiagnosis } from "../imap/validator.js";
 import { markMessages, parseMarkReadBody } from "../imap/flags.js";
 import { formatSmtpError, testSmtpConnection, type SmtpCfg } from "../smtp/validator.js";
 import { assertSendable, deliverMail, mailboxFromAddress, parseSendBody, SEND_ROUTE_BODY_LIMIT } from "../smtp/send.js";
@@ -61,6 +61,11 @@ function smtpPasswordFor(c: Connection, dek: Buffer): string {
   return c.smtpSecretCiphertext && c.smtpSecretIv
     ? decryptSmtpSecret(c.smtpSecretCiphertext, c.smtpSecretIv, dek, c.id)
     : decryptSecret(c.secretCiphertext, c.secretIv, dek, c.id);
+}
+
+/** 422 body for a failed IMAP/SMTP check: which side, which field, and a hint. */
+function setupError(d: MailDiagnosis, code: string) {
+  return { error: d.message, code, side: d.side, field: d.field, hint: d.hint };
 }
 
 function maxDate(a: Date | null, b: Date | null): Date | null {
@@ -295,7 +300,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
     const cfg = { host: body.host, port: body.port, tlsMode: body.tls_mode, allowInvalidCert: body.allow_invalid_cert, username: body.username };
     const test = await testImapConnection(cfg, body.password);
-    if (!test.ok) return reply.code(422).send({ error: test.message, code: "validation_failed" });
+    if (!test.ok) return reply.code(422).send(setupError(test, "validation_failed"));
 
     // Enabling send: pin the effective SMTP settings (defaults included) and prove the login works.
     const smtpHost = body.smtp_host ?? (body.send_enabled ? env.SMTP_DEFAULT_HOST : null);
@@ -308,7 +313,7 @@ export async function registerRoutes(app: FastifyInstance) {
         username: body.username, allowInvalidCert: body.allow_invalid_cert,
       });
       const smtpTest = await testSmtpConnection(smtpCfg, body.smtp_password ?? body.password);
-      if (!smtpTest.ok) return reply.code(422).send({ error: smtpTest.message, code: "smtp_validation_failed" });
+      if (!smtpTest.ok) return reply.code(422).send(setupError(smtpTest, "smtp_validation_failed"));
       smtpValidatedAt = new Date();
     }
 
@@ -403,7 +408,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const password = body.password ?? existingPassword;
     if (connectionChanged && password) {
       const test = await testImapConnection(effectiveCfg, password);
-      if (!test.ok) return reply.code(422).send({ error: test.message, code: "validation_failed" });
+      if (!test.ok) return reply.code(422).send(setupError(test, "validation_failed"));
     }
 
     if (testSmtp) {
@@ -411,7 +416,7 @@ export async function registerRoutes(app: FastifyInstance) {
         body.smtp_password ??
         (body.smtp_password === null || !c.smtpSecretCiphertext ? password! : smtpPasswordFor(c, dek!));
       const smtpTest = await testSmtpConnection(resolveSmtpCfg(nextSmtp), smtpPassword);
-      if (!smtpTest.ok) return reply.code(422).send({ error: smtpTest.message, code: "smtp_validation_failed" });
+      if (!smtpTest.ok) return reply.code(422).send(setupError(smtpTest, "smtp_validation_failed"));
     }
 
     const updates: Partial<typeof schema.connections.$inferInsert> = { updatedAt: new Date() };
@@ -574,7 +579,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (q.connection_id && targets.length === 0) throw notFound("Connection not found");
 
     const cursor = q.cursor ? decodeCursor(q.cursor) : null;
-    const query = { since, from: q.from, unread: q.unread === "true", subject: q.subject, limit };
+    const query = { since, from: q.from, unread: q.unread === "true", subject: q.subject, text: q.q, limit };
 
     // Fan out (bounded by the tier's concurrency cap); collect candidates tagged by connection + uid.
     const tagged: { connId: string; uid: number; message: UnifiedMessage }[] = [];

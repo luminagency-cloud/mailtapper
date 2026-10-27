@@ -14,6 +14,7 @@
     "db:push":     "doppler run -p mailtapper -c dev -- drizzle-kit push",
     "seed":        "doppler run -p mailtapper -c dev -- tsx src/scripts/seed.ts",
     "issue-key":   "doppler run -p mailtapper -c dev -- tsx src/scripts/issue-key.ts",
+    "test:roundtrip": "tsx src/scripts/roundtrip.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "tsc -p tsconfig.test.json --noEmit && tsx --test test/*.test.ts"
   },

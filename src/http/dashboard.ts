@@ -25,7 +25,7 @@ export const dashboardHtml = `<!doctype html>
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--ink);
     font:18px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
-  .wrap { max-width:1100px; margin:0 auto; padding:40px 24px 88px; }
+  .wrap { padding:32px 32px 88px; }
   header { display:flex; align-items:baseline; gap:12px; border-bottom:3px solid var(--ink);
     padding-bottom:14px; margin-bottom:22px; }
   h1 { font-size:32px; line-height:1.15; margin:0; letter-spacing:0; }
@@ -55,6 +55,7 @@ export const dashboardHtml = `<!doctype html>
   .grid label { display:flex; flex-direction:column; gap:6px; font-size:16px; font-weight:700; color:var(--muted); }
   .grid label input, .grid label select { font-weight:400; color:var(--ink); }
   .grid label.check { flex-direction:row; align-items:center; gap:10px; grid-column:1 / -1; }
+  .grid label.field-err { background:var(--hi); outline:4px solid #000; outline-offset:4px; }
   .advanced { grid-column:1 / -1; display:grid; grid-template-columns:1fr 1fr; gap:14px 16px; }
   .advanced summary { grid-column:1 / -1; cursor:pointer; font-weight:800; }
   .account-label { display:block; font-size:15px; font-weight:700; margin-top:4px; }
@@ -62,7 +63,7 @@ export const dashboardHtml = `<!doctype html>
   .hidden { display:none; }
   .msg { min-height:22px; font-size:16px; margin:10px 2px 0; }
   .msg.ok { color:#000; } .msg.err, .err { display:inline-block; background:#000; color:var(--hi); padding:2px 6px; }
-  .action-row { display:flex; align-items:center; gap:8px; flex-wrap:nowrap; }
+  .action-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .pull-toggle { display:flex; align-items:center; gap:6px; white-space:nowrap; font-size:15px; font-weight:700; }
   .pull-toggle input { width:18px; height:18px; }
   .result { border:2px solid #000; border-radius:8px; margin:0; padding:12px; background:#fff; }
@@ -72,15 +73,14 @@ export const dashboardHtml = `<!doctype html>
     white-space:pre-wrap; word-break:break-word; max-height:340px; overflow:auto;
     font:15px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
   .table-wrap { width:100%; overflow-x:auto; border:2px solid var(--line); border-radius:8px; background:var(--panel); }
-  table { width:100%; border-collapse:collapse; font-size:16px; min-width:820px; }
-  th, td { text-align:left; padding:12px 13px; border-bottom:2px solid var(--line); vertical-align:top; }
+  table { width:100%; border-collapse:collapse; font-size:16px; }
+  th, td { text-align:left; padding:12px 13px; border-bottom:2px solid var(--line); vertical-align:top; overflow-wrap:anywhere; }
   th { background:var(--chip); color:var(--hi); font-size:15px; white-space:nowrap; }
   tbody tr:last-child td { border-bottom:0; }
   .badge { display:inline-block; padding:3px 9px; border-radius:999px; font-size:15px; font-weight:800; }
   .badge.ok, .badge.err, .badge.warn { background:#000; color:var(--hi); }
   .pill { display:inline-block; margin:0 5px 5px 0; padding:4px 8px; border:2px solid var(--line);
     border-radius:999px; color:var(--muted); background:#fff; white-space:nowrap; }
-  td.actions { white-space:nowrap; min-width:430px; }
   .heading-row { display:flex; align-items:center; gap:10px; justify-content:space-between; }
   .heading-row h2 { margin-right:auto; }
   code { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:15px; color:#000; background:#fff; }
@@ -262,7 +262,11 @@ export const dashboardHtml = `<!doctype html>
 
   async function api(path, opts) {
     var result = await apiResult(path, opts);
-    if (!result.http_ok) throw new Error((result.data && result.data.error) || ("HTTP " + result.status));
+    if (!result.http_ok) {
+      var err = new Error((result.data && result.data.error) || ("HTTP " + result.status));
+      err.data = result.data;
+      throw err;
+    }
     return result.data;
   }
 
@@ -300,8 +304,22 @@ export const dashboardHtml = `<!doctype html>
       "</div></td></tr>";
   }
 
+  function clearFieldError() {
+    document.querySelectorAll("#addForm .field-err").forEach(function (el) { el.classList.remove("field-err"); });
+  }
+
+  // Mark the form field a 422 setup error names (host, smtp_port, ...) so the fix is obvious.
+  function showFieldError(field) {
+    var input = field && $("#addForm").elements[field];
+    if (!input) return;
+    if (field.indexOf("smtp_") === 0) $("#smtpDetails").open = true;
+    input.closest("label").classList.add("field-err");
+    input.focus();
+  }
+
   function resetMailboxForm() {
     var f = $("#addForm");
+    clearFieldError();
     editingMailboxId = null;
     $("#mailboxFormTitle").textContent = "Add mailbox connection";
     $("#saveMailbox").textContent = "Validate & add";
@@ -507,6 +525,7 @@ export const dashboardHtml = `<!doctype html>
     if (smtpUser) payload.smtp_username = smtpUser; else if (editingMailboxId) payload.smtp_username = null;
     if (fromName) payload.from_name = fromName; else if (editingMailboxId) payload.from_name = null;
     if (f.smtp_password.value) payload.smtp_password = f.smtp_password.value;
+    clearFieldError();
     msg.textContent = editingMailboxId ? "Validating update..." : "Validating...";
     msg.className = "msg";
     try {
@@ -518,7 +537,11 @@ export const dashboardHtml = `<!doctype html>
       resetMailboxForm();
       loadConns();
       loadClients();
-    } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
+    } catch (e) {
+      msg.textContent = e.message;
+      msg.className = "msg err";
+      showFieldError(e.data && e.data.field);
+    }
   });
 
   $("#connBody").addEventListener("click", async function (ev) {

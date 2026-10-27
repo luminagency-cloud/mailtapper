@@ -60,7 +60,7 @@ curl -sS -X POST localhost:3000/v1/connections \
     "source_account":"you@yourdomain.com","provider":"cpanel"
   }'
 #   → {"id":"<CONNECTION_UUID>","status":"active",...}   ← grab CONNECTION_UUID
-#   → 422 {"error":"Authentication failed..."}  ← fix host/port/tls_mode/creds
+#   → 422 {"error":"Receive (IMAP): ...","side":"receive","field":"tls_mode","hint":"..."}  ← fix the named field
 ```
 
 Pull mail live through the API:
@@ -69,7 +69,8 @@ Pull mail live through the API:
 curl -sS "localhost:3000/v1/messages?limit=5" -H "authorization: Bearer $KEY"
 # {"data":[ {id, internal_id, from, subject, received_at, body_text, ...} ], "next_cursor":null}
 
-# filters: &since=2026-06-14T00:00:00Z  &unread=true  &from=jane@x.com  &connection_id=<CONNECTION_UUID>
+# filters: &since=2026-06-14T00:00:00Z  &unread=true  &from=jane@x.com  &subject=invoice  &q=acme%20invoice  &connection_id=<CONNECTION_UUID>
+# q = full text (subject, headers and body) via IMAP TEXT; best effort, depends on the mail server
 # single message:
 curl -sS "localhost:3000/v1/messages/<id-from-data>" -H "authorization: Bearer $KEY"
 ```

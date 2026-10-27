@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer";
-import { formatMailError } from "../imap/validator.js";
+import { diagnoseMailError, formatMailError, type MailDiagnosis } from "../imap/validator.js";
 
 export interface SmtpCfg {
   host: string;
@@ -32,13 +32,16 @@ export function formatSmtpError(error: unknown): string {
 }
 
 /** One-shot SMTP login check (connect + AUTH, no message sent), run BEFORE send settings are saved. */
-export async function testSmtpConnection(cfg: SmtpCfg, password: string): Promise<{ ok: boolean; message: string }> {
+export async function testSmtpConnection(
+  cfg: SmtpCfg,
+  password: string,
+): Promise<{ ok: true; message: string } | ({ ok: false } & MailDiagnosis)> {
   const transport = buildTransport(cfg, password);
   try {
     await transport.verify();
     return { ok: true, message: "SMTP login succeeded." };
   } catch (err) {
-    return { ok: false, message: formatSmtpError(err) };
+    return { ok: false, ...diagnoseMailError(err, "send", cfg) };
   } finally {
     transport.close();
   }
