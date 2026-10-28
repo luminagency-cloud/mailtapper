@@ -6,7 +6,7 @@ Two services on one machine: **mailtapper on `:3000`**, **luminmail on `:3001`**
 
 ## Prereqs
 
-Node 20+, a Postgres URL for this machine (Neon is fine locally), your mailbox's IMAP credentials, plus `openssl` and `psql`. Production uses local Postgres 16 on the VM — see the README's [Hosting & deployment](../README.md#hosting--deployment).
+Node 20+, Docker (for a throwaway local Postgres), your mailbox's IMAP credentials, plus `openssl` and `psql`. Production uses local Postgres 16 on the VM — see the README's [Hosting & deployment](../README.md#hosting--deployment).
 
 > **`.env` auto-loads.** mailtapper bundles `dotenv`, so a `.env` in the repo root is picked up automatically by the server, the seed script, and drizzle-kit — no shell sourcing. (In Docker, env comes from `environment:` and dotenv simply no-ops.)
 
@@ -26,7 +26,8 @@ npm install
 cp .env.example .env
 echo "MAILTAPPER_KEK_B64=$(openssl rand -base64 32)"        # paste into .env
 echo "MAILTAPPER_LOCATOR_SECRET=$(openssl rand -base64 32)" # paste into .env
-# then edit .env: DATABASE_URL=<your Postgres url>, PORT=3000
+docker run -d --name mailtapper-dev-pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:16-alpine
+# .env.example already points DATABASE_URL at it. Set PORT=3000.
 
 npm run db:push                   # create tables: connections, api_keys, tenants, tenant_keys
 npm run seed -- "personal"        # prints your API key ONCE — copy it

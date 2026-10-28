@@ -120,7 +120,7 @@ docker build --target build -t mailtapper-tools .
 docker run --rm --network mailtapper_default --env-file .env mailtapper-tools npx drizzle-kit push
 ```
 
-The `npm run db:push / seed / issue-key` scripts wrap `doppler`, which isn't used on the VM. Call the tools directly as above, for example `... mailtapper-tools npx tsx src/scripts/issue-key.ts messages:read,messages:send,messages:write`.
+The runtime image has no dev deps, so on the VM call the tools through the tools image as above, for example `... mailtapper-tools npx tsx src/scripts/issue-key.ts messages:read,messages:send,messages:write`.
 
 ### Logs, backups, restore
 
@@ -131,7 +131,18 @@ docker compose logs -f api        # or caddy / db
 gunzip -c ~/mailtapper-backups/mailtapper-YYYY-MM-DD.sql.gz | docker compose exec -T db psql -U mailtapper -d mailtapper   # restore
 ```
 
-Backups stay on the VM's own disk. Copy them off now and then, together with the KEK, if the data matters.
+**Off-VM copy.** If `~/.mailtapper-offsite.env` exists (chmod 600), `backup.sh` also uploads each dump to an S3-compatible bucket through the `amazon/aws-cli` image. Use a key that can only write to that one bucket, and set a lifecycle rule on the bucket to delete old dumps (for example after 90 days).
+
+```bash
+# ~/.mailtapper-offsite.env — Cloudflare R2 example
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+BACKUP_S3_URI=s3://<bucket>/mailtapper/
+BACKUP_S3_ENDPOINT=https://<account id>.r2.cloudflarestorage.com
+# AWS S3: leave out BACKUP_S3_ENDPOINT and set AWS_DEFAULT_REGION=<bucket region>
+```
+
+**If the VM is lost:** make a new VM and follow this section. Put the KEK from your password manager in the new `.env`. Download the newest dump from the bucket, then restore it with the `gunzip ... | psql` command above. The dump without the KEK cannot decrypt the mailbox passwords.
 
 ### Domain / TLS
 
