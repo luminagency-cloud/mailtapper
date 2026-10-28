@@ -14,6 +14,7 @@ export const unauthorized = (m = "Invalid or missing API key") => new HttpError(
 export const forbidden = (m: string) => new HttpError(403, m, "forbidden");
 export const notFound = (m = "Not found") => new HttpError(404, m, "not_found");
 export const gone = (m = "Message locator is stale; re-query") => new HttpError(410, m, "gone");
+export const payloadTooLarge = (m: string) => new HttpError(413, m, "payload_too_large");
 export const upstream = (m: string) => new HttpError(502, m, "upstream_error");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -33,6 +34,9 @@ export async function withRetry<T>(
       return await fn();
     } catch (err) {
       lastErr = err;
+      // 4xx is the caller's problem (stale id, oversize attachment). Retrying would
+      // just repeat a fetch we already know will fail. 5xx and socket errors still retry.
+      if (err instanceof HttpError && err.status >= 400 && err.status < 500) throw err;
       if (attempt === tries - 1) break;
       const backoff = Math.min(capMs, baseMs * 2 ** attempt);
       await sleep(Math.random() * backoff); // full jitter

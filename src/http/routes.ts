@@ -15,7 +15,8 @@ import { assertSendable, deliverMail, mailboxFromAddress, parseSendBody, SEND_RO
 import {
   getOrCreateTenantDek, loadDekById, encryptSecret, decryptSecret, encryptSmtpSecret, decryptSmtpSecret,
 } from "../crypto/envelope.js";
-import { appendToSent, fetchOne, searchAndFetch, setSeen, type FetchTarget } from "../imap/fetch.js";
+import { attachmentHeaders, parseAttachmentIndex } from "../imap/attachments.js";
+import { appendToSent, fetchAttachment, fetchOne, searchAndFetch, setSeen, type FetchTarget } from "../imap/fetch.js";
 import { decodeLocator } from "../imap/locator.js";
 import { decodeCursor, encodeCursor } from "./cursor.js";
 import { dashboardHtml } from "./dashboard.js";
@@ -644,6 +645,25 @@ export async function registerRoutes(app: FastifyInstance) {
     const loc = decodeLocator((req.params as { id: string }).id);
     const c = await loadConnection(loc.connectionId, a.tenantId);
     return fetchOne(await buildTarget(c, a.tenantId), loc.folder, loc.uid, loc.uidValidity);
+  });
+
+  // Raw bytes of one attachment. `index` is `attachments[].index` from the message.
+  // Fetched from IMAP on this request; the bytes are not stored. message/rfc822 is a file.
+  app.get("/v1/messages/:id/attachments/:index", async (req, reply) => {
+    const a = ctx(req);
+    requireScope(req, "messages:read");
+    const { id, index: indexRaw } = req.params as { id: string; index: string };
+    const index = parseAttachmentIndex(indexRaw);
+    const loc = decodeLocator(id);
+    const c = await loadConnection(loc.connectionId, a.tenantId);
+    const file = await fetchAttachment(await buildTarget(c, a.tenantId), loc.folder, loc.uid, loc.uidValidity, index);
+    const headers = attachmentHeaders(file);
+    return reply
+      .header("content-type", headers["content-type"])
+      .header("content-disposition", headers["content-disposition"])
+      .header("content-length", headers["content-length"])
+      .header("cache-control", headers["cache-control"])
+      .send(file.body);
   });
 
   // Write `\Seen` back to the mailbox (the flag GET uses for is_unread). `read: false` clears it.

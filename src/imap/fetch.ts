@@ -1,7 +1,8 @@
 import type { ImapFlow, SearchObject } from "imapflow";
 import { buildClient, formatMailError, type ConnCfg } from "./validator.js";
+import { MAX_MESSAGE_BYTES, readAttachment, type AttachmentFile } from "./attachments.js";
 import { normalizeMessage, type UnifiedMessage } from "./normalize.js";
-import { withRetry, upstream, gone } from "../util.js";
+import { payloadTooLarge, withRetry, upstream, gone } from "../util.js";
 import {
   asFlagMailbox,
   asSentMailbox,
@@ -149,6 +150,38 @@ export async function setSeen(t: FetchTarget, items: SeenItem[], seen: boolean):
  */
 export async function appendToSent(t: FetchTarget, raw: Buffer): Promise<SentSaveResult> {
   return withClient(t, (client) => saveSentWithClient(asSentMailbox(client), raw), { tries: 1 });
+}
+
+/**
+ * Live-fetch one attachment. The RFC822 source is read from IMAP for this request
+ * and dropped when the handler returns; nothing is written to the database.
+ * `index` matches `attachments[].index` on the normalized message.
+ */
+export async function fetchAttachment(
+  t: FetchTarget,
+  folder: string,
+  uid: number,
+  uidValidity: number,
+  index: number,
+): Promise<AttachmentFile> {
+  return withClient(t, async (client) => {
+    const lock = await client.getMailboxLock(folder);
+    try {
+      const mailbox = client.mailbox;
+      if (!mailbox) throw gone();
+      if (Number(mailbox.uidValidity) !== uidValidity) throw gone();
+      const meta = await client.fetchOne(String(uid), { uid: true, size: true }, { uid: true });
+      if (!meta) throw gone();
+      if (typeof meta.size === "number" && meta.size > MAX_MESSAGE_BYTES) {
+        throw payloadTooLarge(`Message is ${meta.size} bytes; attachment download is limited to ${MAX_MESSAGE_BYTES} bytes`);
+      }
+      const msg = await client.fetchOne(String(uid), { uid: true, source: true }, { uid: true });
+      if (!msg || !msg.source) throw gone();
+      return readAttachment(msg.source, index);
+    } finally {
+      lock.release();
+    }
+  });
 }
 
 /** Re-fetch a single message by its locator (folder, uid, uidvalidity). */

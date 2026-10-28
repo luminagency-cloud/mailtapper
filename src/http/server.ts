@@ -6,8 +6,16 @@ import { authenticate } from "./auth.js";
 import { TIERS, type Tier } from "./limits.js";
 import { registerRoutes } from "./routes.js";
 
+/**
+ * Signed message ids are `base64url(json) + "." + base64url(hmac)` — about 180
+ * characters for a normal INBOX uid, longer when the folder name is long.
+ * Fastify's default maxParamLength is 100, so GET /v1/messages/:id never matched
+ * a real id and returned 404 after auth. Dots in the id are fine; length was the miss.
+ */
+export const MAX_PARAM_LENGTH = 2048;
+
 export async function buildServer() {
-  const app = Fastify({ logger: { level: env.LOG_LEVEL }, trustProxy: true });
+  const app = Fastify({ logger: { level: env.LOG_LEVEL }, trustProxy: true, maxParamLength: MAX_PARAM_LENGTH });
 
   // Tolerate an empty body on application/json requests (e.g. bodyless POSTs like
   // /connections/:id/test or DELETE) instead of throwing FST_ERR_CTP_EMPTY_JSON_BODY.

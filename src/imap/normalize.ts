@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { simpleParser, type AddressObject } from "mailparser";
 import { convert as htmlToText } from "html-to-text";
+import { listAttachments } from "./attachments.js";
 import { encodeLocator } from "./locator.js";
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -49,11 +50,9 @@ export async function normalizeMessage(rawSource: Buffer, ctx: NormalizeCtx) {
 
   const receivedAt = p.date ?? new Date();
   const from = addrs(p.from)[0] ?? { name: null, email: null };
-  const attachments = (p.attachments ?? []).map((a) => ({
-    filename: a.filename ?? null,
-    content_type: a.contentType ?? null,
-    size_bytes: a.size ?? null,
-  }));
+  // Separate parse so an inline message/rfc822 stays a downloadable file, while body_text
+  // still includes text the default parser pulls out of that forward.
+  const attachments = await listAttachments(rawSource);
   const messageId = p.messageId ?? null;
 
   return {

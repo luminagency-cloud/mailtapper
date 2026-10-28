@@ -48,7 +48,10 @@
   "subject": "Project update",
   "received_at": "2026-06-21T11:30:00Z",
   "body_text": "Clean, HTML-stripped text…",
-  "has_attachments": true
+  "has_attachments": true,
+  "attachments": [
+    { "index": 0, "filename": "forwarded.eml", "content_type": "message/rfc822", "size_bytes": 40960 }
+  ]
 }
 ```
 
@@ -159,6 +162,26 @@ Filters: `since`, `from`, `subject`, `unread=true`, `connection_id`, `limit`, `c
 
 A failed connection check (create, update, `/test`, `/test-smtp`) returns `side` (`receive` = IMAP, `send` = SMTP), `field` (the setting to fix, for example `smtp_tls_mode`) and a `hint`, as well as `error`.
 
+`id` on each message is an opaque signed locator (it contains a `.`). Re-fetch that one message with it:
+
+```bash
+curl -sS "localhost:3000/v1/messages/$ID" -H "authorization: Bearer $KEY"
+```
+
+## Attachments
+
+Each message lists attachments with an `index`, `filename`, `content_type`, and `size_bytes`. The bytes are not stored. `GET /v1/messages/{id}/attachments/{index}` fetches the message from IMAP and returns that one part. `index` is the number in the list, starting at 0. The same Bearer key and `messages:read` scope as the other read routes.
+
+A `message/rfc822` part (a forwarded `.eml`, including one that contains a `.zip`) is one file. The download is the raw embedded message, so the zip stays inside it. A part with no filename is named `message.eml`.
+
+```bash
+curl -sS "localhost:3000/v1/messages/$ID/attachments/0" \
+  -H "authorization: Bearer $KEY" \
+  -D - -o forwarded.eml
+```
+
+The response is the raw bytes. `Content-Type` is the part's media type (`message/rfc822`, `application/pdf`, …) and `Content-Disposition` carries the filename. Limit: 25 MiB for the part, and the raw message must be 32 MiB or smaller (`413`, code `payload_too_large`). A non-numeric index is `400`. An index past the end is `404`. A stale message id is `410`, the same as `GET /v1/messages/{id}`.
+
 ## Sending and mark-read
 
 Both routes use the same Bearer API key as the read endpoints. A key needs `messages:send` to send and `messages:write` to mark read or unread (`admin` includes both). A `messages:read` key cannot do either. Unauthenticated calls are rejected.
@@ -205,6 +228,6 @@ The key needs `connections:read`, `messages:read` and `messages:send`. Without `
 
 ## Status
 
-**v1 (in progress):** IMAP read, SMTP send, mark-read write-back, live fetch + thin cache, per-tenant API keys.
+**v1 (in progress):** IMAP read (attachment bytes on demand), SMTP send, mark-read write-back, live fetch + thin cache, per-tenant API keys.
 
 **Later:** only what a real agent workflow needs, tracked in Linear (team LA, project Mailtapper). Gmail and Microsoft 365 are out of scope. Nothing polls or pushes in the background.

@@ -62,6 +62,25 @@ describe("send and mark-read auth", () => {
     const messages = await app.inject({ method: "GET", url: "/v1/messages" });
     assert.equal(messages.statusCode, 401);
 
+    const { encodeLocator } = await import("../src/imap/locator.js");
+    const { MAX_PARAM_LENGTH } = await import("../src/http/server.js");
+    const id = encodeLocator({ connectionId: "550e8400-e29b-41d4-a716-446655440000", folder: "INBOX", uid: 42, uidValidity: 7 });
+    assert.ok(id.length > 100);
+    assert.equal(id.includes("."), true);
+    const one = app.findRoute({ method: "GET", url: `/v1/messages/${id}` });
+    assert.equal(one?.params.id, id);
+    const file = app.findRoute({ method: "GET", url: `/v1/messages/${id}/attachments/0` });
+    assert.equal(file?.params.id, id);
+    assert.equal(file?.params.index, "0");
+    const longId = "a".repeat(MAX_PARAM_LENGTH);
+    assert.equal(app.findRoute({ method: "GET", url: `/v1/messages/${longId}` })?.params.id, longId);
+    assert.equal(app.findRoute({ method: "GET", url: `/v1/messages/${"b".repeat(MAX_PARAM_LENGTH + 1)}` }), null);
+    assert.match(app.printRoutes(), /attachments/);
+
+    const attachment = await app.inject({ method: "GET", url: `/v1/messages/${id}/attachments/0` });
+    assert.equal(attachment.statusCode, 401);
+    assert.equal(attachment.json().code, "unauthorized");
+
     const health = await app.inject({ method: "GET", url: "/healthz" });
     assert.equal(health.statusCode, 200);
     const expectedVersion = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;

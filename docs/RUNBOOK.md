@@ -41,7 +41,7 @@ Verify (new terminal):
 
 ```bash
 curl -s localhost:3000/healthz
-# {"ok":true,"service":"mailtapper","version":"0.4.0"}  # version comes from package.json
+# {"ok":true,"service":"mailtapper","version":"<package.json version>"}
 ```
 
 ---
@@ -72,8 +72,10 @@ curl -sS "localhost:3000/v1/messages?limit=5" -H "authorization: Bearer $KEY"
 
 # filters: &since=2026-06-14T00:00:00Z  &unread=true  &from=jane@x.com  &subject=invoice  &q=acme%20invoice  &connection_id=<CONNECTION_UUID>
 # q = full text (subject, headers and body) via IMAP TEXT; best effort, depends on the mail server
-# single message:
+# single message (id is the opaque locator from data[].id; it contains a dot):
 curl -sS "localhost:3000/v1/messages/<id-from-data>" -H "authorization: Bearer $KEY"
+# one attachment. index comes from data[].attachments[].index. Raw bytes, not JSON.
+curl -sS "localhost:3000/v1/messages/<id-from-data>/attachments/0" -H "authorization: Bearer $KEY" -o attachment.bin
 ```
 
 If that returns your real mail as clean JSON, **mailtapper works.**
