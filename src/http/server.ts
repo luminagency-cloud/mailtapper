@@ -4,6 +4,7 @@ import { env } from "../env.js";
 import { HttpError } from "../util.js";
 import { authenticate } from "./auth.js";
 import { TIERS, type Tier } from "./limits.js";
+import { registerMcp } from "./mcp.js";
 import { registerRoutes } from "./routes.js";
 
 /**
@@ -59,5 +60,6 @@ export async function buildServer() {
   });
 
   await registerRoutes(app);
+  registerMcp(app);
   return app;
 }

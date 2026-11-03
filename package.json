@@ -1,6 +1,6 @@
 {
   "name": "mailtapper",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "description": "A mail bridge for AI agents — read and send non-Gmail, non-Microsoft 365 mailboxes as clean JSON.",
   "type": "module",
@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@fastify/rate-limit": "^9.1.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.33.0",
     "fastify": "^4.28.0",

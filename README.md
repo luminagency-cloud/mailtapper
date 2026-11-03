@@ -214,6 +214,26 @@ curl -sS -X POST localhost:3000/v1/messages/read \
 
 Limits: 50 recipients, 1 MiB combined text+html, 100 ids per mark-read call. Header fields reject CR/LF. A successful send appends the same bytes to the IMAP Sent folder when the server has one (`\Sent`, or a folder named Sent). If that copy fails, the send result is still success and `saved_to_sent` is false.
 
+## Claude and other MCP clients
+
+`POST /mcp` is an MCP server (Streamable HTTP, stateless) with two tools:
+
+- `list_mailboxes`: each registered mailbox with its From address, label and whether sending is on.
+- `send_email`: sends from one mailbox, picked by id, From address or label, through the same `/v1/connections/:id/send` route, Sent copy included.
+
+It uses the normal Bearer API key, and each tool runs with that key's scopes. Give the key `connections:read` and `messages:send`:
+
+```bash
+# on the VM (see "Redeploy / update" for the tools image)
+docker run --rm --network mailtapper_default --env-file .env mailtapper-tools npx tsx src/scripts/issue-key.ts connections:read,messages:send
+
+# on your machine, in Claude Code
+claude mcp add --transport http mailtapper https://mailtapper.luminagency.com/mcp \
+  --header "Authorization: Bearer mtapper_live_..."
+```
+
+A mailbox shows up for sending once it is registered with `send_enabled` on and its SMTP check passes. claude.ai connectors expect OAuth, which `/mcp` does not offer yet, so this works from Claude Code and other clients that can send a header.
+
 ## Live round-trip check
 
 `npm run test:roundtrip` sends real mail. Mailbox A sends to B and B sends to A, with the subject `MailTapper test <timestamp>`. Then it polls each INBOX through `/v1/messages` until the message arrives. It is not part of `npm test`.
@@ -228,6 +248,6 @@ The key needs `connections:read`, `messages:read` and `messages:send`. Without `
 
 ## Status
 
-**v1 (in progress):** IMAP read (attachment bytes on demand), SMTP send, mark-read write-back, live fetch + thin cache, per-tenant API keys.
+**v1 (in progress):** IMAP read (attachment bytes on demand), SMTP send, mark-read write-back, MCP endpoint for list and send, live fetch + thin cache, per-tenant API keys.
 
 **Later:** only what a real agent workflow needs, tracked in Linear (team LA, project Mailtapper). Gmail and Microsoft 365 are out of scope. Nothing polls or pushes in the background.
