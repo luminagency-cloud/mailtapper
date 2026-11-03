@@ -91,7 +91,7 @@ Node + TypeScript · Fastify · ImapFlow · Nodemailer · Postgres · Docker + C
 
 `.env` sets `COMPOSE_FILE=docker-compose.yml:deploy/gcp/compose.gcp.yml` and `COMPOSE_PROJECT_NAME=mailtapper`, so a plain `docker compose ...` in `~/mailtapper` uses the overlay. Services are `api` (Node, 384 MB cap), `db` (postgres:16-alpine, 256 MB cap, volume `mailtapper_pg_data`) and `caddy` (128 MB cap, certs in volume `mailtapper_caddy_data`). All are `restart: unless-stopped` and Docker is enabled at boot, so the stack comes back on reboot (tested). Unattended security upgrades are on.
 
-`.env` keys: `COMPOSE_FILE`, `COMPOSE_PROJECT_NAME`, `MAILTAPPER_DOMAIN=mailtapper.luminagency.com`, `POSTGRES_PASSWORD`, `DATABASE_URL` (`postgres://mailtapper:…@db:5432/mailtapper?sslmode=disable`), `MAILTAPPER_KEK_B64`, `MAILTAPPER_LOCATOR_SECRET`, `PORT=3000`, `PUBLIC_BASE_URL=https://mailtapper.luminagency.com/`, `LOG_LEVEL`, `CACHE_TTL_SECONDS`, `DEFAULT_TIER`, `SMTP_DEFAULT_HOST=smtp.luminagency.com`, `SMTP_DEFAULT_PORT=587`, `SMTP_DEFAULT_TLS_MODE=starttls`. Secrets were generated on the VM with `openssl rand`.
+`.env` keys: `COMPOSE_FILE`, `COMPOSE_PROJECT_NAME`, `MAILTAPPER_DOMAIN=mailtapper.luminagency.com`, `POSTGRES_PASSWORD`, `DATABASE_URL` (`postgres://mailtapper:…@db:5432/mailtapper?sslmode=disable`), `MAILTAPPER_KEK_B64`, `MAILTAPPER_LOCATOR_SECRET`, `PORT=3000`, `PUBLIC_BASE_URL=https://mailtapper.luminagency.com/`, `LOG_LEVEL`, `CACHE_TTL_SECONDS`, `DEFAULT_TIER`, `SMTP_DEFAULT_HOST=smtp.luminagency.com`, `SMTP_DEFAULT_PORT=587`, `SMTP_DEFAULT_TLS_MODE=starttls`, `LOGIN_SENDER_CONNECTION_ID` (the mailbox that mails sign-in links). Secrets were generated on the VM with `openssl rand`.
 
 > **Back up `MAILTAPPER_KEK_B64`** (for example in a password manager). If it's lost, every stored mailbox password becomes unreadable, and the database backups can't be decrypted either.
 
@@ -150,6 +150,20 @@ BACKUP_S3_ENDPOINT=https://<account id>.r2.cloudflarestorage.com
 ### Domain / TLS
 
 Public URL is `https://mailtapper.luminagency.com`. Cloudflare (zone `luminagency.com`) has `A mailtapper → 34.148.236.200`, **DNS only** (not proxied). That overrides the proxied `*.luminagency.com` wildcard so Caddy can obtain the certificate. On the VM, `.env` sets `MAILTAPPER_DOMAIN=mailtapper.luminagency.com` and `PUBLIC_BASE_URL=https://mailtapper.luminagency.com/`. Caddy serves that name and renews the Let's Encrypt certificate itself (ports 80 and 443 must stay open).
+
+## Dashboard sign-in
+
+The dashboard at `/` works on a phone and on a desktop. People sign in with an email link, not a password:
+
+1. Type the account's sign-in email and tap **Email me a sign-in link**. `POST /auth/login` mails a one-time link that expires in 15 minutes. The reply is the same for unknown addresses. The limit is 5 requests per IP in 15 minutes.
+2. Open the link and tap **Sign in**. `POST /auth/confirm` sets an `HttpOnly; Secure; SameSite=Strict` cookie that lasts 30 days. The tap is necessary: a mail scanner that only opens the link cannot use it up.
+3. **Me → Sign out** (`POST /auth/logout`) ends the session.
+
+A session has the same scopes as the account's active API keys. Cookie-authenticated writes must send the header `x-mailtapper: 1`. Only SHA-256 hashes of link and session tokens are stored, in the `logins` table.
+
+Set-up: give the account a sign-in email (**Accounts → Sign-in email**, or `PATCH /v1/admin/clients/:id {"email": ...}`). Then set `LOGIN_SENDER_CONNECTION_ID` to a send-enabled mailbox connection that mails the links. Without it, `/auth/login` returns 503 and only API keys work. **Use an API key instead** on the sign-in page still works.
+
+Lost API key: **Me → Make a new API key** (`POST /v1/me/api-key/rotate`, needs `connections:write`), or an admin uses **Accounts → New API key**. All current keys of that account stop working. Mailboxes and settings do not change, because API keys encrypt nothing. Only the loss of `MAILTAPPER_KEK_B64` loses data.
 
 ## Reading and search
 

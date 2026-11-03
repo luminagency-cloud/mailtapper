@@ -20,6 +20,8 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
 export const tenants = pgTable("tenants", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: text("name").notNull(),
+  // Dashboard sign-in address (stored lowercase). Null = this account can only use API keys.
+  email: text("email").unique(),
   tier: text("tier", { enum: ["free", "pro", "scale"] }).notNull().default("free"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -37,6 +39,20 @@ export const apiKeys = pgTable("api_keys", {
   lastUsedIp: inet("last_used_ip"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
+});
+
+/**
+ * Dashboard sign-ins. A row starts as an emailed one-time link (link_hash) and becomes a
+ * session (session_hash) when the link is used. Only SHA-256 hashes of the tokens are stored.
+ */
+export const logins = pgTable("logins", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tenantId: uuid("tenant_id").references(() => tenants.id, { onDelete: "cascade" }).notNull(),
+  linkHash: text("link_hash").unique(),
+  sessionHash: text("session_hash").unique(),
+  scopes: text("scopes").array().notNull().default([]),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 /** Envelope-encryption data keys: one (current) DEK per tenant, stored wrapped by the KEK. */

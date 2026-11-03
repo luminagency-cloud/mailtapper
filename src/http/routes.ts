@@ -47,7 +47,7 @@ function publicConnection(c: Connection) {
 type SmtpFields = Pick<Connection, "smtpHost" | "smtpPort" | "smtpTlsMode" | "smtpUsername" | "username" | "allowInvalidCert">;
 
 /** Effective SMTP settings: the connection's own values, else the env defaults / IMAP login. */
-function resolveSmtpCfg(c: SmtpFields): SmtpCfg {
+export function resolveSmtpCfg(c: SmtpFields): SmtpCfg {
   return {
     host: c.smtpHost ?? env.SMTP_DEFAULT_HOST,
     port: c.smtpPort ?? env.SMTP_DEFAULT_PORT,
@@ -58,7 +58,7 @@ function resolveSmtpCfg(c: SmtpFields): SmtpCfg {
 }
 
 /** The SMTP password: its own secret if one is stored, else the IMAP password. */
-function smtpPasswordFor(c: Connection, dek: Buffer): string {
+export function smtpPasswordFor(c: Connection, dek: Buffer): string {
   return c.smtpSecretCiphertext && c.smtpSecretIv
     ? decryptSmtpSecret(c.smtpSecretCiphertext, c.smtpSecretIv, dek, c.id)
     : decryptSecret(c.secretCiphertext, c.secretIv, dek, c.id);
@@ -130,12 +130,61 @@ const updateBody = z.object({
   smtp_password: z.string().min(1).nullable().optional(),
 });
 
-const userKeyScopes = ["connections:read", "connections:write", "messages:read", "messages:send", "messages:write"];
+export const userKeyScopes = ["connections:read", "connections:write", "messages:read", "messages:send", "messages:write"];
+
+/** Dashboard sign-in address, stored lowercase. */
+const loginEmail = z.string().trim().toLowerCase().email().max(320);
 
 const createClientBody = z.object({
   name: z.string().min(1),
+  email: loginEmail.optional(),
   tier: z.enum(["free", "pro", "scale"]).default(env.DEFAULT_TIER),
 });
+
+/** Postgres unique violation on tenants.email -> 409 instead of a 500. */
+function emailTaken(err: unknown): never {
+  if ((err as { code?: string }).code === "23505") throw new HttpError(409, "That email already belongs to another account", "conflict");
+  throw err;
+}
+
+/**
+ * Revoke every active key of a tenant and issue one new key with the union of their scopes
+ * (user scopes if there were none). Mailboxes and settings are untouched: keys encrypt nothing.
+ */
+async function rotateTenantKey(tenantId: string) {
+  return db.transaction(async (tx) => {
+    const [tenant] = await tx.select().from(schema.tenants).where(eq(schema.tenants.id, tenantId)).limit(1);
+    if (!tenant) throw notFound("Client not found");
+
+    const activeKeys = await tx
+      .select()
+      .from(schema.apiKeys)
+      .where(and(eq(schema.apiKeys.tenantId, tenantId), isNull(schema.apiKeys.revokedAt)))
+      .orderBy(desc(schema.apiKeys.createdAt));
+
+    const scopes = activeKeys.length
+      ? Array.from(new Set(activeKeys.flatMap((key) => key.scopes)))
+      : userKeyScopes;
+
+    const key = generateApiKey("live");
+    await tx
+      .update(schema.apiKeys)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(schema.apiKeys.tenantId, tenantId), isNull(schema.apiKeys.revokedAt)));
+    await tx.insert(schema.apiKeys).values({
+      tenantId,
+      keyPrefix: key.prefix,
+      keyHash: key.hash,
+      scopes,
+    });
+
+    return {
+      client: { id: tenant.id, name: tenant.name, tier: tenant.tier },
+      api_key: key.raw,
+      scopes,
+    };
+  });
+}
 
 export async function registerRoutes(app: FastifyInstance) {
   app.get("/healthz", async () => ({ ok: true, service: "mailtapper", version: serviceVersion }));
@@ -155,8 +204,12 @@ export async function registerRoutes(app: FastifyInstance) {
   // ---------- Control plane ----------
   app.get("/v1/me", async (req) => {
     const a = ctx(req);
+    const tenant = await db.query.tenants.findFirst({ where: eq(schema.tenants.id, a.tenantId) });
     return {
       tenant_id: a.tenantId,
+      name: tenant?.name ?? null,
+      email: tenant?.email ?? null,
+      via: a.via,
       key_id: a.keyId,
       tier: a.tier,
       scopes: a.scopes,
@@ -170,7 +223,11 @@ export async function registerRoutes(app: FastifyInstance) {
 
     const key = generateApiKey("live");
     const tenant = await db.transaction(async (tx) => {
-      const [row] = await tx.insert(schema.tenants).values({ name: body.name, tier: body.tier }).returning();
+      const [row] = await tx
+        .insert(schema.tenants)
+        .values({ name: body.name, email: body.email ?? null, tier: body.tier })
+        .returning()
+        .catch(emailTaken);
       await tx.insert(schema.apiKeys).values({
         tenantId: row!.id,
         keyPrefix: key.prefix,
@@ -183,6 +240,7 @@ export async function registerRoutes(app: FastifyInstance) {
     return reply.code(201).send({
       id: tenant.id,
       name: tenant.name,
+      email: tenant.email,
       tier: tenant.tier,
       created_at: tenant.createdAt,
       api_key: key.raw,
@@ -241,6 +299,7 @@ export async function registerRoutes(app: FastifyInstance) {
         return {
           id: tenant.id,
           name: tenant.name,
+          email: tenant.email,
           tier: tenant.tier,
           created_at: tenant.createdAt,
           connections,
@@ -251,42 +310,29 @@ export async function registerRoutes(app: FastifyInstance) {
     };
   });
 
-  app.post("/v1/admin/clients/:id/api-key/rotate", async (req) => {
+  app.patch("/v1/admin/clients/:id", async (req) => {
     requireScope(req, "admin");
     const { id } = req.params as { id: string };
+    const body = z.object({ email: loginEmail.nullable() }).parse(req.body ?? {});
+    const [row] = await db
+      .update(schema.tenants)
+      .set({ email: body.email })
+      .where(eq(schema.tenants.id, id))
+      .returning()
+      .catch(emailTaken);
+    if (!row) throw notFound("Client not found");
+    return { id: row.id, name: row.name, email: row.email, tier: row.tier };
+  });
 
-    return db.transaction(async (tx) => {
-      const [tenant] = await tx.select().from(schema.tenants).where(eq(schema.tenants.id, id)).limit(1);
-      if (!tenant) throw notFound("Client not found");
+  app.post("/v1/admin/clients/:id/api-key/rotate", async (req) => {
+    requireScope(req, "admin");
+    return rotateTenantKey((req.params as { id: string }).id);
+  });
 
-      const activeKeys = await tx
-        .select()
-        .from(schema.apiKeys)
-        .where(and(eq(schema.apiKeys.tenantId, id), isNull(schema.apiKeys.revokedAt)))
-        .orderBy(desc(schema.apiKeys.createdAt));
-
-      const scopes = activeKeys.length
-        ? Array.from(new Set(activeKeys.flatMap((key) => key.scopes)))
-        : userKeyScopes;
-
-      const key = generateApiKey("live");
-      await tx
-        .update(schema.apiKeys)
-        .set({ revokedAt: new Date() })
-        .where(and(eq(schema.apiKeys.tenantId, id), isNull(schema.apiKeys.revokedAt)));
-      await tx.insert(schema.apiKeys).values({
-        tenantId: id,
-        keyPrefix: key.prefix,
-        keyHash: key.hash,
-        scopes,
-      });
-
-      return {
-        client: { id: tenant.id, name: tenant.name, tier: tenant.tier },
-        api_key: key.raw,
-        scopes,
-      };
-    });
+  // Self-service: a signed-in user (or a key with connections:write) replaces their own account's key.
+  app.post("/v1/me/api-key/rotate", async (req) => {
+    requireScope(req, "connections:write");
+    return rotateTenantKey(ctx(req).tenantId);
   });
 
   app.post("/v1/connections", async (req, reply) => {

@@ -18,6 +18,8 @@ const schema = z.object({
   SMTP_DEFAULT_HOST: z.string().default("smtp.stackmail.com"),
   SMTP_DEFAULT_PORT: z.coerce.number().default(587),
   SMTP_DEFAULT_TLS_MODE: z.enum(["ssl", "starttls", "none"]).default("starttls"),
+  // Send-enabled mailbox connection that mails dashboard sign-in links. Unset = email sign-in is off.
+  LOGIN_SENDER_CONNECTION_ID: z.union([z.string().uuid(), z.literal("")]).optional(),
 });
 
 export const env = schema.parse(process.env);
