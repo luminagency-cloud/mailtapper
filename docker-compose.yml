@@ -1,5 +1,5 @@
 # mailtapper — mail bridge for AI agents. Pull-only: no worker, nothing is polled or stored.
-# Production on the GCP VM also loads deploy/gcp/compose.gcp.yml (see README "Hosting & deployment").
+# Production on the GCP VM also loads deploy/gcp/compose.gcp.yml (see docs/DEPLOY.md).
 services:
   api:
     build: .
