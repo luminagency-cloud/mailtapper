@@ -22,11 +22,20 @@ npm run dev                   # http://localhost:3000
 
 `.env` loads automatically. `npm test` runs the test suite with no network or database.
 
-## Add a mailbox
+## Sign in and add a mailbox
 
-Open the dashboard at `/`, paste your API key in the top bar and save. Under **Mailboxes**, add the mailbox's IMAP host, port, TLS mode, username and password. Tick **Enable sending** to let agents send from it, and set a From name.
+Open the dashboard at `/`. It works on a phone or a desktop. Sign in with an emailed link, or open **Use an API key instead** and paste a key.
+
+Under **Mailboxes**, tap **+ Add** and enter the mailbox's IMAP host, port, TLS mode, username and password. Tick **Enable sending** to let agents send from it, and set a From name.
 
 Mailtapper logs in to IMAP, and to SMTP when sending is on, before it saves. If a login fails, the form names the setting to fix. SMTP settings you leave blank fall back to the `SMTP_DEFAULT_*` values in `.env`, and the SMTP login falls back to the IMAP login.
+
+Email sign-in needs two things:
+
+- The account has a sign-in email (**Accounts → Sign-in email**, or `PATCH /v1/admin/clients/:id` with `{"email": ...}`).
+- `LOGIN_SENDER_CONNECTION_ID` in `.env` is the id of a send-enabled mailbox. It mails the links. Without it, email sign-in is off and only API keys work.
+
+Links last 15 minutes and sessions 30 days. Lost your key? **Me → Make a new API key**. Every current key of that account stops working, but mailboxes and settings stay.
 
 ## Connect Claude Code
 
@@ -47,7 +56,7 @@ On the production VM, run `issue-key` through the tools image (see [Deploy](#dep
 
 ## API
 
-Every route except `/healthz` and the dashboard needs `Authorization: Bearer <key>`.
+Every route except `/healthz`, the dashboard and `/auth/*` needs `Authorization: Bearer <key>` (or the dashboard's session cookie).
 
 | Route | Scope | What it does |
 |---|---|---|
@@ -60,6 +69,8 @@ Every route except `/healthz` and the dashboard needs `Authorization: Bearer <ke
 | `GET /v1/messages/:id/attachments/:index` | `messages:read` | One attachment's raw bytes |
 | `POST /v1/connections/:id/send` | `messages:send` | Send. Body: `to`, `cc`, `bcc`, `subject`, `text` and/or `html`, `reply_to`, `in_reply_to`, `references` |
 | `POST /v1/messages/read` | `messages:write` | Mark messages read, or unread with `"read": false` |
+| `POST /v1/me/api-key/rotate` | `connections:write` | Replace your own account's API keys |
+| `POST /auth/login`, `/auth/confirm`, `/auth/logout` | none | Dashboard email sign-in |
 | `POST /mcp` | per tool | The MCP tools above |
 
 An `admin` key covers every scope and also manages accounts under `/v1/admin/clients`. Limits per send: 50 recipients and 1 MiB of body text. If the Sent copy fails, the send still counts and `saved_to_sent` is `false`.

@@ -4,6 +4,7 @@ import { env } from "../env.js";
 import { HttpError } from "../util.js";
 import { authenticate } from "./auth.js";
 import { TIERS, type Tier } from "./limits.js";
+import { registerLogin } from "./login.js";
 import { registerMcp } from "./mcp.js";
 import { registerRoutes } from "./routes.js";
 
@@ -34,7 +35,8 @@ export async function buildServer() {
   // Authenticate first (except health) so the rate limiter can scale by tenant tier.
   app.addHook("onRequest", async (req) => {
     const path = req.url.split("?")[0];
-    if (path === "/healthz" || path === "/") return; // health check + dashboard shell are unauthenticated
+    // Health check, dashboard shell and the sign-in routes are unauthenticated.
+    if (path === "/healthz" || path === "/" || path?.startsWith("/auth/")) return;
     await authenticate(req);
   });
 
@@ -60,6 +62,7 @@ export async function buildServer() {
   });
 
   await registerRoutes(app);
+  registerLogin(app);
   registerMcp(app);
   return app;
 }

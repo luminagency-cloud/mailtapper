@@ -15,6 +15,7 @@ services:
       SMTP_DEFAULT_HOST: ${SMTP_DEFAULT_HOST:-smtp.stackmail.com}
       SMTP_DEFAULT_PORT: ${SMTP_DEFAULT_PORT:-587}
       SMTP_DEFAULT_TLS_MODE: ${SMTP_DEFAULT_TLS_MODE:-starttls}
+      LOGIN_SENDER_CONNECTION_ID: ${LOGIN_SENDER_CONNECTION_ID:-}
     expose:
       - "3000"
 

@@ -25,7 +25,7 @@ Use the SSH button on the VM in the Cloud console, or `ssh grok@34.148.236.200` 
 ~/mailtapper-backups/            # dumps, kept 14 days
 ```
 
-`.env` sets `COMPOSE_FILE=docker-compose.yml:deploy/gcp/compose.gcp.yml` and `COMPOSE_PROJECT_NAME=mailtapper`, so a plain `docker compose` command uses the overlay. Its other keys: `MAILTAPPER_DOMAIN`, `POSTGRES_PASSWORD`, `DATABASE_URL` (host `db`), `MAILTAPPER_KEK_B64`, `MAILTAPPER_LOCATOR_SECRET`, `PORT=3000`, `PUBLIC_BASE_URL`, `LOG_LEVEL`, `CACHE_TTL_SECONDS`, `DEFAULT_TIER` and the three `SMTP_DEFAULT_*` values.
+`.env` sets `COMPOSE_FILE=docker-compose.yml:deploy/gcp/compose.gcp.yml` and `COMPOSE_PROJECT_NAME=mailtapper`, so a plain `docker compose` command uses the overlay. Its other keys: `MAILTAPPER_DOMAIN`, `POSTGRES_PASSWORD`, `DATABASE_URL` (host `db`), `MAILTAPPER_KEK_B64`, `MAILTAPPER_LOCATOR_SECRET`, `PORT=3000`, `PUBLIC_BASE_URL`, `LOG_LEVEL`, `CACHE_TTL_SECONDS`, `DEFAULT_TIER`, the three `SMTP_DEFAULT_*` values and `LOGIN_SENDER_CONNECTION_ID` (the mailbox that mails dashboard sign-in links).
 
 Keep a copy of `MAILTAPPER_KEK_B64` in a password manager. Without it, the stored mailbox passwords can't be decrypted, from the live database or from a backup.
 

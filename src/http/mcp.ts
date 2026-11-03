@@ -7,8 +7,8 @@ import { serviceVersion } from "../version.js";
 
 /**
  * MCP over Streamable HTTP at POST /mcp, stateless (one server per request, no session ids).
- * Auth is the normal Bearer API key, checked by the server's onRequest hook. Each tool calls the
- * existing /v1 routes through app.inject with the caller's own key, so scopes, validation, rate
+ * Auth is the normal Bearer API key (or dashboard session), checked by the server's onRequest hook. Each tool
+ * calls the existing /v1 routes through app.inject with the caller's own credentials, so scopes, validation, rate
  * limits and the Sent-folder copy behave exactly as they do over plain HTTP.
  */
 
@@ -70,9 +70,9 @@ const textResult = (value: unknown, isError = false) => ({
 
 const recipients = z.array(z.string()).min(1);
 
-function buildMcpServer(app: FastifyInstance, authorization: string): McpServer {
+function buildMcpServer(app: FastifyInstance, auth: Record<string, string>): McpServer {
   const server = new McpServer({ name: "mailtapper", version: serviceVersion });
-  const headers = { authorization, "content-type": "application/json" };
+  const headers = { ...auth, "content-type": "application/json" };
 
   async function listMailboxes(): Promise<Mailbox[] | string> {
     const res = await app.inject({ method: "GET", url: "/v1/connections", headers });
@@ -140,7 +140,13 @@ function buildMcpServer(app: FastifyInstance, authorization: string): McpServer 
 
 export function registerMcp(app: FastifyInstance): void {
   app.post("/mcp", { bodyLimit: SEND_ROUTE_BODY_LIMIT }, async (req, reply) => {
-    const server = buildMcpServer(app, req.headers.authorization!);
+    // Pass on whatever authenticated this request (API key, or the dashboard session and its header).
+    const auth: Record<string, string> = {};
+    for (const name of ["authorization", "cookie", "x-mailtapper"]) {
+      const value = req.headers[name];
+      if (typeof value === "string") auth[name] = value;
+    }
+    const server = buildMcpServer(app, auth);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     reply.hijack();
     reply.raw.once("close", () => {
