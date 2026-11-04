@@ -241,6 +241,20 @@ export const dashboardHtml = `<!doctype html>
         All current keys of this account stop working. Mailboxes and settings do not change.</p>
       <button id="rotateMine" type="button" class="block">Make a new API key</button>
     </div>
+    <div class="card" style="margin-top:14px">
+      <div class="title">Key for a new app</div>
+      <p class="small">Add one more key for a new app. Your other keys continue to work.</p>
+      <form id="appKeyForm" class="form" autocomplete="off">
+        <label>The app can
+          <select name="scopes">
+            <option value="messages:read">Read mail only</option>
+            <option value="connections:read,messages:read,messages:send,messages:write" selected>Read, send and flag mail</option>
+            <option value="connections:read,connections:write,messages:read,messages:send,messages:write">Do everything, also change mailboxes</option>
+          </select>
+        </label>
+        <div class="form-actions"><button type="submit" class="block">Make key for app</button></div>
+      </form>
+    </div>
     <div style="margin-top:14px"><button id="signOut" type="button" class="ghost block">Sign out</button></div>
   </section>
 </main>
@@ -443,6 +457,17 @@ export const dashboardHtml = `<!doctype html>
       var out = await api("/v1/me/api-key/rotate", { method: "POST" });
       if (getKey()) lsSet("mtap_key", out.api_key);
       showKey("New API key", out);
+    } catch (e) { toast(e.message); }
+    finally { btn.disabled = false; }
+  });
+
+  $("#appKeyForm").addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    var btn = ev.target.querySelector("button");
+    btn.disabled = true;
+    try {
+      var out = await api("/v1/me/api-keys", { method: "POST", body: JSON.stringify({ scopes: ev.target.scopes.value.split(",") }) });
+      showKey("API key for your app", out);
     } catch (e) { toast(e.message); }
     finally { btn.disabled = false; }
   });

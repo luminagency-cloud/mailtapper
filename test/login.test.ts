@@ -60,3 +60,14 @@ describe("email sign-in", () => {
     assert.match(res.body, /\/auth\/login/);
   });
 });
+
+describe("app keys", () => {
+  it("grants only user scopes the caller already holds", async () => {
+    const { canGrant } = await import("../src/http/routes.js");
+    assert.equal(canGrant(["messages:read"], ["messages:read", "connections:write"]), true);
+    assert.equal(canGrant(["messages:send"], ["messages:read", "connections:write"]), false);
+    assert.equal(canGrant(["messages:send", "connections:write"], ["admin"]), true);
+    assert.equal(canGrant(["admin"], ["admin"]), false);
+    assert.equal(canGrant(["bogus"], ["admin"]), false);
+  });
+});

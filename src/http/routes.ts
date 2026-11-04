@@ -132,6 +132,11 @@ const updateBody = z.object({
 
 export const userKeyScopes = ["connections:read", "connections:write", "messages:read", "messages:send", "messages:write"];
 
+/** A new app key may only carry user scopes that the caller already holds (admin holds all). */
+export function canGrant(requested: string[], held: string[]): boolean {
+  return requested.every((s) => userKeyScopes.includes(s) && (held.includes("admin") || held.includes(s)));
+}
+
 /** Dashboard sign-in address, stored lowercase. */
 const loginEmail = z.string().trim().toLowerCase().email().max(320);
 
@@ -333,6 +338,17 @@ export async function registerRoutes(app: FastifyInstance) {
   app.post("/v1/me/api-key/rotate", async (req) => {
     requireScope(req, "connections:write");
     return rotateTenantKey(ctx(req).tenantId);
+  });
+
+  // Self-service: add one more key (for a new app) without revoking the account's other keys.
+  app.post("/v1/me/api-keys", async (req, reply) => {
+    requireScope(req, "connections:write");
+    const a = ctx(req);
+    const { scopes } = z.object({ scopes: z.array(z.string()).min(1) }).parse(req.body ?? {});
+    if (!canGrant(scopes, a.scopes)) throw new HttpError(403, "You cannot give a key scopes you do not have", "forbidden");
+    const key = generateApiKey("live");
+    await db.insert(schema.apiKeys).values({ tenantId: a.tenantId, keyPrefix: key.prefix, keyHash: key.hash, scopes });
+    return reply.code(201).send({ api_key: key.raw, scopes });
   });
 
   app.post("/v1/connections", async (req, reply) => {
