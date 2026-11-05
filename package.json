@@ -1,19 +1,21 @@
 {
   "name": "mailtapper",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "description": "A mail bridge for AI agents — read and send non-Gmail, non-Microsoft 365 mailboxes as clean JSON.",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "dev":         "tsx watch src/index.ts",
-    "build":      "tsc -p tsconfig.json",
-    "start":      "node dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
     "db:generate": "drizzle-kit generate",
-    "db:migrate":  "drizzle-kit migrate",
-    "db:push":     "drizzle-kit push",
-    "seed":        "tsx src/scripts/seed.ts",
-    "issue-key":   "tsx src/scripts/issue-key.ts",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "seed": "tsx src/scripts/seed.ts",
+    "issue-key": "tsx src/scripts/issue-key.ts",
     "test:roundtrip": "tsx src/scripts/roundtrip.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "tsc -p tsconfig.test.json --noEmit && tsx --test test/*.test.ts"
