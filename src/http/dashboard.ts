@@ -6,9 +6,10 @@
  * instead (kept in localStorage, sent as a Bearer token).
  *
  * The inner JS uses string concatenation (no backticks or template interpolation) so it embeds cleanly.
- * The only server-side interpolation is the SMTP defaults, shown as placeholders.
+ * Server-side interpolation: the SMTP defaults (placeholders) and the version in the header.
  */
 import { env } from "../env.js";
+import { serviceVersion } from "../version.js";
 
 export const dashboardHtml = `<!doctype html>
 <html lang="en">
@@ -31,6 +32,7 @@ export const dashboardHtml = `<!doctype html>
   .top { position:sticky; top:0; z-index:5; display:flex; align-items:center; justify-content:space-between; gap:12px;
     background:#000; color:var(--hi); padding:calc(10px + env(safe-area-inset-top)) 16px 10px; }
   .brand { font-weight:900; font-size:20px; letter-spacing:.2px; }
+  .ver { font-weight:400; font-size:12px; opacity:.6; }
   .who { color:#fff; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:60%; }
 
   .wrap { max-width:1040px; margin:0 auto; padding:16px 16px calc(96px + env(safe-area-inset-bottom)); }
@@ -119,7 +121,7 @@ export const dashboardHtml = `<!doctype html>
 </style>
 </head>
 <body>
-<header class="top"><div class="brand">MailTapper</div><div id="who" class="who"></div></header>
+<header class="top"><div class="brand">MailTapper <span class="ver">v${serviceVersion}</span></div><div id="who" class="who"></div></header>
 <nav id="tabbar" class="tabbar hidden" aria-label="Sections">
   <button data-tab="mailboxes" type="button">Mailboxes</button>
   <button data-tab="clients" type="button">Accounts</button>
