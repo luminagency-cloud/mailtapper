@@ -58,6 +58,23 @@ describe("email sign-in", () => {
     const js = res.body.split("<script>")[1]!.split("</script>")[0]!;
     assert.doesNotThrow(() => new Function(js));
     assert.match(res.body, /\/auth\/login/);
+    const { serviceVersion } = await import("../src/version.js");
+    assert.ok(res.body.includes(`MailTapper <span class="small">v${serviceVersion}</span>`));
+  });
+
+  it("records sanitized sign-in failures and keeps the response useful", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const { buildServer } = await import("../src/http/server.js");
+    const server = await buildServer({ recordError: async (event) => { events.push(event); } });
+    try {
+      const response = await server.inject({ method: "POST", url: "/auth/login?token=secret", payload: { email: "person@example.com" } });
+      assert.equal(response.statusCode, 503);
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(events.length, 1);
+      assert.equal(events[0]!.route, "/auth/login");
+      assert.equal(events[0]!.code, "login_unavailable");
+      assert.doesNotMatch(JSON.stringify(events), /secret|person@example.com/);
+    } finally { await server.close(); }
   });
 });
 

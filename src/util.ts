@@ -4,6 +4,7 @@ export class HttpError extends Error {
     public status: number,
     message: string,
     public code?: string,
+    public causeCode?: string,
   ) {
     super(message);
   }

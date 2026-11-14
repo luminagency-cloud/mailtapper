@@ -1,6 +1,10 @@
 {
   "name": "mailtapper",
+<<<<<<< HEAD
   "version": "0.8.2",
+=======
+  "version": "0.7.1",
+>>>>>>> d916a047f10f9a02fe465ee9405f6496ac4a9596
   "private": true,
   "description": "A mail bridge for AI agents — read and send non-Gmail, non-Microsoft 365 mailboxes as clean JSON.",
   "type": "module",

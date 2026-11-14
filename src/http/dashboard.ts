@@ -19,7 +19,7 @@ export const dashboardHtml = `<!doctype html>
 <meta name="theme-color" content="#000000" />
 <meta name="color-scheme" content="only light" />
 <meta name="darkreader-lock" />
-<title>MailTapper</title>
+<title>MailTapper v${serviceVersion}</title>
 <style>
   /* "only light" stops browser auto-dark modes from inverting the black/yellow palette. */
   :root { --ink:#000; --bg:#fff; --hi:#ffd400; --r:12px; color-scheme:only light; }
@@ -121,7 +121,11 @@ export const dashboardHtml = `<!doctype html>
 </style>
 </head>
 <body>
+<<<<<<< HEAD
 <header class="top"><div class="brand">MailTapper <span class="ver">v${serviceVersion}</span></div><div id="who" class="who"></div></header>
+=======
+<header class="top"><div class="brand">MailTapper <span class="small">v${serviceVersion}</span></div><div id="who" class="who"></div></header>
+>>>>>>> d916a047f10f9a02fe465ee9405f6496ac4a9596
 <nav id="tabbar" class="tabbar hidden" aria-label="Sections">
   <button data-tab="mailboxes" type="button">Mailboxes</button>
   <button data-tab="clients" type="button">Accounts</button>
@@ -369,6 +373,7 @@ export const dashboardHtml = `<!doctype html>
       session = await api("/v1/me");
     } catch (e) {
       if (e.status === 401 && getKey()) { lsSet("mtap_key", ""); setMsg($("#loginMsg"), "That API key does not work any more. Sign in again.", true); }
+      else if (e.status !== 401) { setMsg($("#loginMsg"), "Could not sign in: " + e.message, true); }
       showScreen("signin");
       return;
     }

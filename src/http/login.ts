@@ -16,7 +16,7 @@ import { hashKey } from "../crypto/apikeys.js";
 import { loadDekById } from "../crypto/envelope.js";
 import { deliverMail, mailboxFromAddress, type OutboundTransport } from "../smtp/send.js";
 import type { SmtpCfg } from "../smtp/validator.js";
-import { HttpError, unauthorized, upstream } from "../util.js";
+import { HttpError, unauthorized } from "../util.js";
 import { readSessionCookie, SESSION_COOKIE } from "./auth.js";
 import { resolveSmtpCfg, smtpPasswordFor, userKeyScopes } from "./routes.js";
 
@@ -76,8 +76,9 @@ export function registerLogin(
         await sendLoginLink(email, url, deps);
       } catch (err) {
         if (err instanceof HttpError) throw err;
-        req.log.warn({ err: err instanceof Error ? err.message : String(err) }, "sign-in email failed");
-        throw upstream("Could not send the sign-in email. Try again in a minute.");
+        const code = (err as { code?: unknown })?.code;
+        throw new HttpError(502, "Could not send the sign-in email. Try again in a minute.", "upstream_error",
+          typeof code === "string" && /^[A-Z0-9_]{1,40}$/.test(code) ? code : undefined);
       }
     }
     // Same answer for unknown addresses, so the form does not reveal who has an account.

@@ -36,9 +36,12 @@ The stack restarts on its own after a reboot. Redeploying is in the README.
 ```bash
 docker compose ps
 docker compose logs -f api                 # or caddy, db
+docker compose exec db psql -U mailtapper -d mailtapper -c 'SELECT * FROM error_events ORDER BY created_at DESC LIMIT 50;'
 ~/mailtapper/deploy/gcp/backup.sh          # manual dump; cron runs it nightly at 03:15 UTC
 gunzip -c ~/mailtapper-backups/mailtapper-YYYY-MM-DD.sql.gz | docker compose exec -T db psql -U mailtapper -d mailtapper   # restore
 ```
+
+Apply schema changes with the tools image and `drizzle-kit push` as described in the README before deploying the API. The `error_events` table records server errors and failed credential attempts without request bodies, query strings, email addresses, or keys. If Postgres is unavailable or the table has not been created, events cannot be persisted; check API logs for `could not persist error event`. Events are retained until an operator removes them.
 
 To also copy each dump off the VM, create `~/.mailtapper-offsite.env` (chmod 600). Use a key that can only write to that bucket, and set a lifecycle rule on the bucket to expire old dumps.
 

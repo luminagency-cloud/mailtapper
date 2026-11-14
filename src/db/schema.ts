@@ -55,6 +55,18 @@ export const logins = pgTable("logins", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+/** Sanitized operational failures; never store request bodies, URLs with queries or credentials. */
+export const errorEvents = pgTable("error_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  requestId: text("request_id").notNull(),
+  method: text("method").notNull(),
+  route: text("route").notNull(),
+  status: integer("status").notNull(),
+  code: text("code").notNull(),
+  causeCode: text("cause_code"),
+});
+
 /** Envelope-encryption data keys: one (current) DEK per tenant, stored wrapped by the KEK. */
 export const tenantKeys = pgTable("tenant_keys", {
   id: uuid("id").defaultRandom().primaryKey(),
